@@ -1,3 +1,4 @@
+import path from "path"
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test"
 
 // --- Mock schema chain helpers ---
@@ -39,7 +40,7 @@ mock.module("bun:sqlite", () => ({
   },
 }))
 
-import imageSearchTool from "./image-search"
+import imageSearchTool, { getDbDir } from "./image-search"
 
 // --- Helpers ---
 const encoder = new TextEncoder()
@@ -96,6 +97,33 @@ function mockSpawn(responses: string[]) {
 }
 
 // --- Tests ---
+
+describe("getDbDir", () => {
+  it("uses .local/share/opencode on non-Windows", () => {
+    const dir = getDbDir("linux", undefined, "/home/test")
+    expect(dir).toBe("/home/test/.local/share/opencode")
+  })
+
+  it("uses APPDATA on Windows", () => {
+    const dir = getDbDir("win32", "C:\\Users\\test\\AppData\\Roaming")
+    expect(dir).toMatch(/^C:\\Users\\test\\AppData\\Roaming[\\/]opencode$/)
+  })
+
+  it("falls back when APPDATA is unset on Windows", () => {
+    const dir = getDbDir("win32", undefined)
+    expect(dir).toContain("AppData")
+    expect(dir).toMatch(/opencode$/i)
+  })
+
+  it("defaults to the real platform at runtime", () => {
+    const dir = getDbDir()
+    if (process.platform === "win32") {
+      expect(path.win32.basename(dir)).toBe("opencode")
+    } else {
+      expect(dir).toMatch(/\/\.local\/share\/opencode$/)
+    }
+  })
+})
 
 describe("image-search", () => {
   beforeEach(() => {

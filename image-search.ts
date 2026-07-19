@@ -47,6 +47,16 @@ async function readResponse(
   throw new Error("MCP response timeout or connection closed")
 }
 
+export function getDbDir(
+  platform = process.platform,
+  appData = process.env.APPDATA,
+  homeDir = os.homedir(),
+): string {
+  return platform === "win32"
+    ? path.join(appData ?? "C:\\Users\\Default\\AppData\\Roaming", "opencode")
+    : path.join(homeDir, ".local/share/opencode")
+}
+
 export default tool({
   description:
     "Retrieve an image from the session and perform a reverse image search. " +
@@ -77,7 +87,7 @@ export default tool({
   },
   async execute(args, context) {
     const db = new Database(
-      path.join(os.homedir(), ".local/share/opencode/opencode.db"),
+      path.join(getDbDir(), "opencode.db"),
       { readonly: true },
     )
 

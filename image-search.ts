@@ -50,7 +50,7 @@ async function readResponse(
 export default tool({
   description:
     "Retrieve an image from the session and perform a reverse image search. " +
-    "Omit all args to use the latest image. " +
+    "Omit all args to use the most recent image. " +
     "Supports multiple search engines via image-search-mcp (default: Yandex).",
   args: {
     index: tool.schema
@@ -58,7 +58,7 @@ export default tool({
       .int()
       .positive()
       .optional()
-      .describe("1 = first image in the conversation"),
+      .describe("1 = oldest image in the conversation; omit for most recent"),
     filename: tool.schema
       .string()
       .optional()
@@ -81,19 +81,21 @@ export default tool({
       { readonly: true },
     )
 
-    const rows = db
-      .query(
-        `SELECT p.data
-         FROM part p
-         JOIN message m ON m.id = p.message_id
-         WHERE p.session_id = $sessionID
-           AND json_extract(p.data, '$.type') = 'file'
-           AND json_extract(p.data, '$.mime') LIKE 'image/%'
-         ORDER BY p.id ASC`,
-      )
-      .all({ $sessionID: context.sessionID }) as { data: string }[]
-
-    db.close()
+    let rows: { data: string }[]
+    try {
+      rows = db
+        .query(
+          `SELECT p.data
+           FROM part p
+           WHERE p.session_id = $sessionID
+             AND json_extract(p.data, '$.type') = 'file'
+             AND json_extract(p.data, '$.mime') LIKE 'image/%'
+           ORDER BY p.id ASC`,
+        )
+        .all({ $sessionID: context.sessionID }) as { data: string }[]
+    } finally {
+      db.close()
+    }
 
     if (rows.length === 0) return "No image attachments found in this session"
 
@@ -110,7 +112,7 @@ export default tool({
         return `No image found with filename matching "${args.filename}"`
     }
 
-    const idx = args.index ?? 1
+    const idx = args.index ?? candidates.length
     if (idx > candidates.length) {
       const total = candidates.length
       return `Index ${idx} out of range. ${args.filename ? `Matching "${args.filename}": ` : ""}${total} image${total > 1 ? "s" : ""} available (1 = first, ${total} = most recent).`
@@ -153,7 +155,7 @@ export default tool({
           arguments: {
             source,
             engine: args.engine ?? "Yandex",
-            limit: args.limit,
+            limit: args.limit ?? 10,
           },
         },
       })

@@ -157,6 +157,15 @@ describe("image-search", () => {
     expect(calls.find((s: string) => s.includes("tools/call"))).toContain("Yandex")
   })
 
+  it("defaults limit to 10 when omitted", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"))
+    const proc = mockSpawn([mcpInit, mcpResult("ok")])
+    await imageSearchTool.execute({}, SESSION)
+    const calls = (proc.stdin.write as any).mock.calls.map((c: string[]) => c[0])
+    const call = calls.find((s: string) => s.includes("tools/call"))
+    expect(call).toContain('"limit":10')
+  })
+
   it("passes custom engine and limit", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"))
     const proc = mockSpawn([mcpInit, mcpResult("sauce")])

@@ -23,3 +23,7 @@ OpenCode tool that reverse-searches images dropped into chat.
 - Single `.ts` file, no `package.json` or bundler — just copy into the tools dir.
 - Depends on `@opencode-ai/plugin` (provided by the OpenCode runtime) and `bun:sqlite` (built into Bun).
 - Read-only DB access, clean up resources in `finally` blocks.
+
+## Testing
+
+Run all tests with `bun test`. Uses `mock.module` to stub `bun:sqlite` and `@opencode-ai/plugin`, and replaces `Bun.spawn` with a fake subprocess that returns pre-scripted JSON-RPC responses.

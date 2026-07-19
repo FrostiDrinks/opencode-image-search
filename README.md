@@ -2,8 +2,6 @@
 
 When you drop an image into OpenCode, the image's base64 data is stored in OpenCode's SQLite database. This tool queries that database directly to retrieve the data URI, then uses [`image-search-mcp`](https://pypi.org/project/image-search-mcp/) to reverse image search without requiring agents to handle full URI data themselves.
 
----
-
 ## Usage
 
 ### macOS / Linux

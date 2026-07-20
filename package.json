@@ -5,10 +5,7 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/FrostiDrinks/opencode-image-search.git"
-  },
+  "repository": "FrostiDrinks/opencode-image-search",
   "files": [
     "src",
     "LICENSE",

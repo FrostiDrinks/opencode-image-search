@@ -1,4 +1,5 @@
 import { tool } from "@opencode-ai/plugin"
+import type { Plugin, Hooks } from "@opencode-ai/plugin"
 import { Database } from "bun:sqlite"
 import os from "os"
 import path from "path"
@@ -57,7 +58,7 @@ export function getDbDir(
     : path.join(homeDir, ".local/share/opencode")
 }
 
-export default tool({
+const imageSearchTool = tool({
   description:
     "Retrieve an image from the session and perform a reverse image search. " +
     "Omit all args to use the most recent image. " +
@@ -180,3 +181,13 @@ export default tool({
     }
   },
 })
+
+export default (async function imageSearchPlugin(): Promise<Hooks> {
+  return {
+    tool: {
+      "image-search": imageSearchTool,
+    },
+  }
+}) satisfies Plugin
+
+export { imageSearchTool }

@@ -40,7 +40,7 @@ mock.module("bun:sqlite", () => ({
   },
 }))
 
-import imageSearchTool, { getDbDir } from "./image-search"
+import { imageSearchTool, getDbDir } from "./src/index"
 
 // --- Helpers ---
 const encoder = new TextEncoder()

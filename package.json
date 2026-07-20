@@ -5,6 +5,15 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FrostiDrinks/opencode-image-search.git"
+  },
+  "files": [
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
   "license": "Apache-2.0",
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.14.0"

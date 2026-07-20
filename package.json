@@ -1,6 +1,6 @@
 {
   "name": "opencode-image-search",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "module",
   "exports": {
     "./server": "./src/index.ts"

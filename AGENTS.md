@@ -8,7 +8,7 @@ Add `"opencode-image-search"` to `opencode.json`'s `plugins` array. OpenCode aut
 
 ## How it works
 
-The plugin registers a single tool (`image-search`) via the `tool` hook in `src/index.ts`. Agents invoke this tool to reverse-search images from the current session.
+The plugin registers a single tool (`image_search`) via the `tool` hook in `src/index.ts`. Agents invoke this tool to reverse-search images from the current session.
 
 1. Reads OpenCode's SQLite DB (`~/.local/share/opencode/opencode.db`) to find base64-encoded image attachments for the current session, ordered chronologically.
 2. Filters by filename (case-insensitive substring) and/or 1-based index (default: latest image).

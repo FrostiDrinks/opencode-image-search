@@ -125,7 +125,7 @@ describe("getDbDir", () => {
   })
 })
 
-describe("image-search", () => {
+describe("image_search", () => {
   beforeEach(() => {
     mockRows = []
   })

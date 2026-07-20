@@ -185,11 +185,11 @@ const imageSearchTool = tool({
 export { imageSearchTool }
 
 export default {
-  id: "image-search",
+  id: "image_search",
   async server(): Promise<Hooks> {
     return {
       tool: {
-        "image-search": imageSearchTool,
+        image_search: imageSearchTool,
       },
     }
   },

@@ -18,7 +18,7 @@ OpenCode will install it automatically on startup.
 
 ## Usage
 
-Once installed, the plugin registers an `image-search` tool that agents can invoke on-demand when a given image requires more context.
+Once installed, the plugin registers an `image_search` tool that agents can invoke on-demand when a given image requires more context.
 
 ### Arguments (agent-controlled)
 

@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin"
-import type { Plugin, Hooks } from "@opencode-ai/plugin"
+import type { PluginModule, Hooks } from "@opencode-ai/plugin"
 import { Database } from "bun:sqlite"
 import os from "os"
 import path from "path"
@@ -182,12 +182,17 @@ const imageSearchTool = tool({
   },
 })
 
-export default (async function imageSearchPlugin(): Promise<Hooks> {
-  return {
-    tool: {
-      "image-search": imageSearchTool,
-    },
-  }
-}) satisfies Plugin
-
 export { imageSearchTool }
+
+export default {
+  id: "image-search",
+  async server(): Promise<Hooks> {
+    return {
+      tool: {
+        "image-search": imageSearchTool,
+      },
+    }
+  },
+} satisfies PluginModule
+
+

@@ -30,6 +30,10 @@ The plugin registers a single tool (`image_search`) via the `tool` hook in `src/
 - Depends on `@opencode-ai/plugin` (provided by the OpenCode runtime) and `bun:sqlite` (built into Bun).
 - Read-only DB access, clean up resources in `finally` blocks.
 
+## Limitations
+
+Text-only agents can see image filenames (they are exposed in the conversation history) but cannot visually validate reverse-search results. As such, returned results are more like investigative leads than verified answers.
+
 ## Testing
 
 Run all tests with `bun test`. Uses `mock.module` to stub `bun:sqlite` and `@opencode-ai/plugin`, and replaces `Bun.spawn` with a fake subprocess that returns pre-scripted JSON-RPC responses.

@@ -62,7 +62,8 @@ const imageSearchTool = tool({
   description:
     "Retrieve an image from the session and perform a reverse image search. " +
     "Omit all args to use the most recent image. " +
-    "Supports multiple search engines via image-search-mcp (default: Yandex).",
+    "Supports multiple search engines via image-search-mcp (default: Yandex). " +
+    "Text-only models: use this tool when asked about an image you cannot view.",
   args: {
     index: tool.schema
       .number()
@@ -73,7 +74,7 @@ const imageSearchTool = tool({
     filename: tool.schema
       .string()
       .optional()
-      .describe("Filter by filename (case-insensitive substring match)"),
+      .describe("Filter by filename (case-insensitive substring match). Check the conversation for filenames to target a specific image."),
     engine: tool.schema
       .string()
       .optional()

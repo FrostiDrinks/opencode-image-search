@@ -73,10 +73,39 @@ function mcpResult(text: string) {
   )
 }
 
+const MINI_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "base64",
+)
+
+function mockFetchOk() {
+  globalThis.fetch = mock(
+    () =>
+      Promise.resolve(
+        new Response(MINI_PNG, {
+          headers: { "Content-Type": "image/png" },
+        }),
+      ),
+  ) as any
+}
+
+function mcpResultWithThumbnails(
+  engine: string,
+  results: { title: string; thumbnail: string }[],
+) {
+  const lines = [`Search Engine: ${engine}`, `Found ${results.length} results (showing top ${results.length}):`]
+  results.forEach((r, i) => {
+    lines.push("", `--- Result ${i + 1} ---`, `Title: ${r.title}`, `Thumbnail: ${r.thumbnail}`)
+  })
+  return mcpResult(lines.join("\n"))
+}
+
 const originalSpawn = Bun.spawn
+const originalFetch = globalThis.fetch
 
 afterEach(() => {
   Bun.spawn = originalSpawn
+  globalThis.fetch = originalFetch
 })
 
 function mockSpawn(responses: string[]) {
@@ -222,5 +251,79 @@ describe("image_search", () => {
     const proc = mockSpawn([mcpInit, mcpResult("ok")])
     await imageSearchTool.execute({}, SESSION)
     expect(proc.kill).toHaveBeenCalled()
+  })
+
+  it("returns plain string when MCP response has no Thumbnail lines", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"))
+    mockSpawn([mcpInit, mcpResult("no images found")])
+    const result = await imageSearchTool.execute({}, SESSION)
+    expect(result).toBe("no images found")
+  })
+
+  it("returns structured result with image attachments for thumbnail results", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"))
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "Result A", thumbnail: "https://example.com/a.jpg" },
+        { title: "Result B", thumbnail: "https://example.com/b.jpg" },
+      ]),
+    ])
+    mockFetchOk()
+
+    const result = await imageSearchTool.execute({}, SESSION) as any
+    expect(result.output).toContain("Search Engine: Yandex")
+    expect(result.output).toContain("Result A")
+    expect(result.output).toContain("Result B")
+    expect(result.attachments).toHaveLength(2)
+    expect(result.attachments[0].type).toBe("file")
+    expect(result.attachments[0].mime).toBe("image/png")
+    expect(result.attachments[0].url).toStartWith("data:image/png;base64,")
+    expect(result.attachments[0].filename).toBe("result_1.png")
+    expect(result.attachments[1].filename).toBe("result_2.png")
+  })
+
+  it("caps attachments to the requested limit", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"))
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "R1", thumbnail: "https://example.com/1.jpg" },
+        { title: "R2", thumbnail: "https://example.com/2.jpg" },
+        { title: "R3", thumbnail: "https://example.com/3.jpg" },
+      ]),
+    ])
+    mockFetchOk()
+
+    const result = await imageSearchTool.execute({ limit: 1 }, SESSION) as any
+    expect(result.attachments).toHaveLength(1)
+    expect(result.output).toContain("R1")
+    expect(result.output).toContain("R2") // text still has all results
+    expect(result.output).toContain("R3")
+  })
+
+  it("skips thumbnails that fail to download", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"))
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "Good", thumbnail: "https://example.com/good.jpg" },
+        { title: "Bad", thumbnail: "https://example.com/bad.jpg" },
+      ]),
+    ])
+    let callCount = 0
+    globalThis.fetch = mock(() => {
+      callCount++
+      if (callCount === 2) return Promise.reject(new Error("network error"))
+      return Promise.resolve(
+        new Response(MINI_PNG, {
+          headers: { "Content-Type": "image/png" },
+        }),
+      )
+    }) as any
+
+    const result = await imageSearchTool.execute({}, SESSION) as any
+    expect(result.attachments).toHaveLength(1)
+    expect(result.attachments[0].filename).toBe("result_1.png")
   })
 })

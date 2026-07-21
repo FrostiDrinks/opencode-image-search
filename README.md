@@ -29,6 +29,12 @@ Once installed, the plugin registers an `image_search` tool that agents can invo
 | `engine` | `string?` | `"Yandex"` | Yandex, SauceNAO, Google, TraceMoe, Ascii2D, EHentai, Iqdb, BaiDu, Bing, GoogleLens, Tineye |
 | `limit` | `number?` | `10` | Max results |
 
+### Model compatibility
+
+Filenames of image attachments are visible in the conversation history, so text-only models can reliably target the right image via the `filename` argument.
+
+However, models lacking vision cannot directly validate the output. Results returned by `image-search-mcp` are drawn from the search engine's text snippets; the model must take them on faith. Vision-capable models produce more reliable answers because they can cross-reference the original image against the returned snippets.
+
 ### Environment variables
 
 These are inherited from OpenCode each time the tool is invoked. If required, set them in your shell or via OpenCode's `env` config.

@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin"
-import type { PluginModule, Hooks } from "@opencode-ai/plugin"
+import type { PluginModule, Hooks, ToolAttachment } from "@opencode-ai/plugin"
 import { Database } from "bun:sqlite"
 import os from "os"
 import path from "path"
@@ -56,6 +56,29 @@ export function getDbDir(
   return platform === "win32"
     ? path.join(appData ?? "C:\\Users\\Default\\AppData\\Roaming", "opencode")
     : path.join(homeDir, ".local/share/opencode")
+}
+
+const THUMBNAIL_RE = /^Thumbnail: (.+)$/gm
+
+function extractThumbnails(text: string): string[] {
+  const urls: string[] = []
+  let match: RegExpExecArray | null
+  while ((match = THUMBNAIL_RE.exec(text)) !== null) {
+    urls.push(match[1])
+  }
+  return urls
+}
+
+async function fetchImageAsDataUrl(
+  url: string,
+  signal?: AbortSignal,
+): Promise<{ mime: string; data: string }> {
+  const resp = await fetch(url, { signal })
+  const blob = await resp.blob()
+  const mime = blob.type || "image/jpeg"
+  const buffer = await blob.arrayBuffer()
+  const base64 = Buffer.from(buffer).toString("base64")
+  return { mime, data: `data:${mime};base64,${base64}` }
 }
 
 const imageSearchTool = tool({
@@ -173,10 +196,32 @@ const imageSearchTool = tool({
       })
       const result = (await readResponse(reader, 2)) as any
 
-      if (result?.content?.[0]?.text) {
-        return result.content[0].text
+      const text =
+        result?.content?.[0]?.text ?? JSON.stringify(result)
+
+      const limit = args.limit ?? 10
+      const thumbnailUrls = extractThumbnails(text).slice(0, limit)
+      if (thumbnailUrls.length === 0) return text
+
+      const attachments: ToolAttachment[] = []
+      for (let i = 0; i < thumbnailUrls.length; i++) {
+        try {
+          const { mime, data } = await fetchImageAsDataUrl(
+            thumbnailUrls[i],
+            context.abort,
+          )
+          attachments.push({
+            type: "file",
+            mime,
+            url: data,
+            filename: `result_${i + 1}.${mime.split("/")[1] || "jpg"}`,
+          })
+        } catch {
+          // skip thumbnails that fail to download
+        }
       }
-      return JSON.stringify(result)
+
+      return { output: text, attachments }
     } finally {
       proc.kill()
     }

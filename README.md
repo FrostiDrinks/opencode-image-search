@@ -31,9 +31,9 @@ Once installed, the plugin registers an `image_search` tool that agents can invo
 
 ### Model compatibility
 
-Filenames of image attachments are visible in the conversation history, so text-only models can reliably target the right image via the `filename` argument.
+Vision-capable models receive each result's thumbnail as an image attachment. This lets them visually cross-reference the original image against the results and discard false positives, with the count matching the `limit` argument.
 
-However, models lacking vision cannot directly validate the output. Results returned by `image-search-mcp` are drawn from the search engine's text snippets; the model must take them on faith. Vision-capable models produce more reliable answers because they can cross-reference the original image against the returned snippets.
+Filenames of image attachments are visible in the conversation history, so text-only models can reliably target the right image via the `filename` argument. However, they **cannot** directly validate the output. Results are drawn from the search engine's text snippets, so the model must take them on faith.
 
 ### Environment variables
 
@@ -50,7 +50,7 @@ These are inherited from OpenCode each time the tool is invoked. If required, se
 1. Reads OpenCode's SQLite DB (`~/.local/share/opencode/opencode.db`) to find base64-encoded image attachments for the current session, ordered chronologically.
 2. Filters by filename (case-insensitive substring) and/or 1-based index (default: latest image).
 3. Spawns `uvx image-search-mcp` and talks JSON-RPC 2.0 over stdin/stdout to perform the actual reverse image search.
-4. Returns the text results to the agent.
+4. Returns the text results to the agent, with result thumbnails attached as images for vision-capable models.
 
 ## Development
 

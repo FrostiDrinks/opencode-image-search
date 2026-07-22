@@ -13,7 +13,7 @@ The plugin registers a single tool (`image_search`) via the `tool` hook in `src/
 1. Reads OpenCode's SQLite DB (`~/.local/share/opencode/opencode.db`) to find base64-encoded image attachments for the current session, ordered chronologically.
 2. Filters by filename (case-insensitive substring) and/or 1-based index (default: latest image).
 3. Spawns `uvx image-search-mcp` and talks JSON-RPC 2.0 over stdin/stdout to perform the actual reverse image search.
-4. Returns the text results to the agent.
+4. Returns the text results to the agent. When thumbnail URLs (`Thumbnail: <url>`) appear in the response, the plugin downloads them and attaches them as images for vision-capable models.
 
 ## Arguments
 

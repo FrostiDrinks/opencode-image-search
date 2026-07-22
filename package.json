@@ -1,7 +1,9 @@
 {
   "name": "opencode-image-search",
-  "version": "1.0.5",
+  "version": "1.1.0",
+  "description": "OpenCode plugin that allows agents to reverse-search images dropped into chat.",
   "type": "module",
+  "keywords": ["opencode", "plugin", "image-search", "reverse-image-search"],
   "exports": {
     "./server": "./src/index.ts"
   },
@@ -17,5 +19,8 @@
   "license": "Apache-2.0",
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.15.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.18.4"
   }
 }

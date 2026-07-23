@@ -4,11 +4,14 @@
   "workspaces": {
     "": {
       "name": "opencode-image-search",
+      "dependencies": {
+        "cross-image": "^0.4.3",
+      },
       "devDependencies": {
         "@opencode-ai/plugin": "^1.18.4",
       },
       "peerDependencies": {
-        "@opencode-ai/plugin": "^1.18.4",
+        "@opencode-ai/plugin": ">=1.15.0",
       },
     },
   },
@@ -32,6 +35,8 @@
     "@opencode-ai/sdk": ["@opencode-ai/sdk@1.18.4", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-p/3P0KtWknoLvpsk8QrUzCKd4Q1A5Z3RmACEvwuQBGxnUy4AGo379lUYMgt7fczFn53079oroLuo6BosQri+HA=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
+
+    "cross-image": ["cross-image@0.4.3", "", {}, "sha512-56x2G0Ctl5XOeNH1iXCKy21yukNyRm2+NqaGeSyaPDnm+Vh0S2gspID+0o5eU7I7Uyk4e1NOxOJifXIZQktYwg=="],
 
     "cross-spawn": ["cross-spawn@7.0.6", "", { "dependencies": { "path-key": "^3.1.0", "shebang-command": "^2.0.0", "which": "^2.0.1" } }, "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA=="],
 

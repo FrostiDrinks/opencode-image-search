@@ -31,7 +31,7 @@ Once installed, the plugin registers an `image_search` tool that agents can invo
 
 ### Model compatibility
 
-Vision-capable models receive each result's thumbnail as an image attachment. This lets them visually cross-reference the original image against the results and discard false positives, with the count matching the `limit` argument.
+Each unique thumbnail (see [thumbnail deduplication](#thumbnail-deduplication)) is returned to vision-capable models as an image attachment. This lets them visually cross-reference the original image against the results and discard false positives.
 
 Filenames of image attachments are visible in the conversation history, so text-only models can reliably target the right image via the `filename` argument. However, they **cannot** directly validate the output. Results are drawn from the search engine's text snippets, so the model must take them on faith.
 
@@ -52,10 +52,16 @@ These are inherited from OpenCode each time the tool is invoked. If required, se
 3. Spawns `uvx image-search-mcp` and talks JSON-RPC 2.0 over stdin/stdout to perform the actual reverse image search.
 4. Returns the text results to the agent, with result thumbnails attached as images for vision-capable models.
 
+### Thumbnail deduplication
+
+When multiple search results return the same image (identical or visually similar), the plugin keeps only the **highest resolution** thumbnail and attaches it once. The filename records every result it maps to, with runs of consecutive results collapsing into a range (e.g. `result-1-5,7,9-10.jpeg` represents results 1–5, 7, and 9–10).
+
+Deduplication uses a perceptual hash (dHash). Images within a Hamming distance of 10 bits are grouped together. This catches same-file duplicates, different-compression variants, and same-image-different-resolution returns.
+
 ## Development
 
 ```bash
 bun test
 ```
 
-Uses `mock.module` to stub `bun:sqlite` and `@opencode-ai/plugin`, and replaces `Bun.spawn` with a fake subprocess that returns pre-scripted JSON-RPC responses.
+Uses `mock.module` to stub `bun:sqlite`, `@opencode-ai/plugin`, and `cross-image`, and replaces `Bun.spawn` with a fake subprocess that returns pre-scripted JSON-RPC responses.

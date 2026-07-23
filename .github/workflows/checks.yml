@@ -33,6 +33,8 @@ jobs:
         run: |
           bunx biome ci . --reporter=checkstyle > .biome-report.xml 2>&1 || true
       - name: Post results
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           reviewdog -f=checkstyle -name="Biome" -reporter=github-pr-review -fail-level=error < .biome-report.xml
         if: always()
@@ -44,8 +46,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - uses: reviewdog/action-semgrep@v1
+      - uses: g-wilson/action-semgrep@v1
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-review
           level: warning
           semgrep_config: p/default
@@ -95,6 +98,8 @@ jobs:
             const report = findings.map(f => JSON.stringify({ source: { name: 'check-files' }, ...f })).join('\n');
             fs.writeFileSync('.reviewdog-report.jsonl', report);
       - name: Post results
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           reviewdog -f=rdjsonl -name="check-files" -reporter=github-pr-review -fail-level=error < .reviewdog-report.jsonl
         if: always()

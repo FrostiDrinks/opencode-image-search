@@ -19,6 +19,6 @@
     }
   },
   "files": {
-    "includes": ["**/src/index.ts", "**/image_search.test.ts"]
+    "includes": ["**/*.ts"]
   }
 }

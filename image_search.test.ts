@@ -344,8 +344,8 @@ describe("image_search", () => {
     expect(result.attachments[0].type).toBe("file")
     expect(result.attachments[0].mime).toBe("image/png")
     expect(result.attachments[0].url).toStartWith("data:image/png;base64,")
-    expect(result.attachments[0].filename).toBe("result-1.png")
-    expect(result.attachments[1].filename).toBe("result-2.png")
+    expect(result.attachments[0].filename).toBe("result_1.png")
+    expect(result.attachments[1].filename).toBe("result_2.png")
   })
 
   it("caps attachments to the requested limit", async () => {
@@ -365,7 +365,7 @@ describe("image_search", () => {
 
     const result = await imageSearchTool.execute({ limit: 1 }, SESSION) as any
     expect(result.attachments).toHaveLength(1)
-    expect(result.attachments[0].filename).toBe("result-1.png")
+    expect(result.attachments[0].filename).toBe("result_1.png")
     expect(result.output).toContain("R1")
     expect(result.output).toContain("R2") // text still has all results
     expect(result.output).toContain("R3")
@@ -393,7 +393,7 @@ describe("image_search", () => {
 
     const result = await imageSearchTool.execute({}, SESSION) as any
     expect(result.attachments).toHaveLength(1)
-    expect(result.attachments[0].filename).toBe("result-1.png")
+    expect(result.attachments[0].filename).toBe("result_1.png")
   })
 
   it("deduplicates identical thumbnails into one attachment", async () => {
@@ -413,7 +413,7 @@ describe("image_search", () => {
 
     const result = await imageSearchTool.execute({}, SESSION) as any
     expect(result.attachments).toHaveLength(1)
-    expect(result.attachments[0].filename).toBe("result-1-2.png")
+    expect(result.attachments[0].filename).toBe("result_1-2.png")
   })
 
   it("keeps separate attachments for different thumbnails", async () => {
@@ -433,8 +433,8 @@ describe("image_search", () => {
 
     const result = await imageSearchTool.execute({}, SESSION) as any
     expect(result.attachments).toHaveLength(2)
-    expect(result.attachments[0].filename).toBe("result-1.png")
-    expect(result.attachments[1].filename).toBe("result-2.png")
+    expect(result.attachments[0].filename).toBe("result_1.png")
+    expect(result.attachments[1].filename).toBe("result_2.png")
   })
 
   it("groups non-consecutive duplicates correctly", async () => {
@@ -456,8 +456,8 @@ describe("image_search", () => {
 
     const result = await imageSearchTool.execute({}, SESSION) as any
     expect(result.attachments).toHaveLength(2)
-    expect(result.attachments[0].filename).toBe("result-1,3.png")
-    expect(result.attachments[1].filename).toBe("result-2.png")
+    expect(result.attachments[0].filename).toBe("result_1,3.png")
+    expect(result.attachments[1].filename).toBe("result_2.png")
   })
 
   it("picks highest resolution thumbnail from each duplicate group", async () => {
@@ -504,7 +504,7 @@ describe("image_search", () => {
 
     const result = await imageSearchTool.execute({}, SESSION) as any
     expect(result.attachments).toHaveLength(1)
-    expect(result.attachments[0].filename).toBe("result-1-3.png")
+    expect(result.attachments[0].filename).toBe("result_1-3.png")
   })
 
   it("formats a run of 5 consecutive duplicates as a range", async () => {
@@ -530,6 +530,6 @@ describe("image_search", () => {
 
     const result = await imageSearchTool.execute({}, SESSION) as any
     expect(result.attachments).toHaveLength(1)
-    expect(result.attachments[0].filename).toBe("result-1-5.png")
+    expect(result.attachments[0].filename).toBe("result_1-5.png")
   })
 })

@@ -1,6 +1,6 @@
 {
   "name": "opencode-image-search",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "OpenCode plugin that allows agents to reverse-search images dropped into chat.",
   "type": "module",
   "keywords": ["opencode", "plugin", "image-search", "reverse-image-search"],

@@ -54,7 +54,7 @@ These are inherited from OpenCode each time the tool is invoked. If required, se
 
 ### Thumbnail deduplication
 
-When multiple search results return the same image (identical or visually similar), the plugin keeps only the **highest resolution** thumbnail and attaches it once. The filename records every result it maps to, with runs of consecutive results collapsing into a range (e.g. `result-1-5,7,9-10.jpeg` represents results 1–5, 7, and 9–10).
+When multiple search results return the same image (identical or visually similar), the plugin keeps only the **highest resolution** thumbnail and attaches it once. The filename records every result it maps to, with runs of consecutive results collapsing into a range (e.g. `result_1-5,7,9-10.jpeg` represents results 1–5, 7, and 9–10).
 
 Deduplication uses a perceptual hash (dHash). Images within a Hamming distance of 10 bits are grouped together. This catches same-file duplicates, different-compression variants, and same-image-different-resolution returns.
 

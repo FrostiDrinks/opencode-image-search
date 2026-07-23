@@ -353,7 +353,7 @@ const imageSearchTool = tool({
           type: "file",
           mime: winner.mime,
           url: `data:${winner.mime};base64,${base64}`,
-          filename: `result-${formatIndices(indices)}.${ext}`,
+          filename: `result_${formatIndices(indices)}.${ext}`,
         })
       }
 

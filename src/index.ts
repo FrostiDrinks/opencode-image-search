@@ -1,6 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 import type { PluginModule, Hooks, ToolAttachment } from "@opencode-ai/plugin"
 import { Database } from "bun:sqlite"
+import { Image } from "cross-image"
 import os from "os"
 import path from "path"
 
@@ -69,16 +70,123 @@ function extractThumbnails(text: string): string[] {
   return urls
 }
 
-async function fetchImageAsDataUrl(
+async function fetchImageAsBuffer(
   url: string,
   signal?: AbortSignal,
-): Promise<{ mime: string; data: string }> {
+): Promise<{ buffer: Uint8Array; mime: string }> {
   const resp = await fetch(url, { signal })
   const blob = await resp.blob()
   const mime = blob.type || "image/jpeg"
-  const buffer = await blob.arrayBuffer()
-  const base64 = Buffer.from(buffer).toString("base64")
-  return { mime, data: `data:${mime};base64,${base64}` }
+  const buffer = new Uint8Array(await blob.arrayBuffer())
+  return { buffer, mime }
+}
+
+const DHASH_THRESHOLD = 10
+
+async function perceptualHash(
+  data: Uint8Array,
+): Promise<{ hash: bigint; width: number; height: number } | null> {
+  try {
+    const img = await Image.decode(data)
+    const origWidth = img.width
+    const origHeight = img.height
+    img.resize({ width: 9, height: 8 })
+    const pixels = img.data
+
+    let hash = 0n
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        const idx = (y * 9 + x) * 4
+        const idxNext = (y * 9 + x + 1) * 4
+        const left =
+          0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2]
+        const right =
+          0.299 * pixels[idxNext] +
+          0.587 * pixels[idxNext + 1] +
+          0.114 * pixels[idxNext + 2]
+        if (left > right) hash |= 1n << BigInt(y * 8 + x)
+      }
+    }
+    return { hash, width: origWidth, height: origHeight }
+  } catch {
+    return null
+  }
+}
+
+function hammingDistance(a: bigint, b: bigint): number {
+  let xor = a ^ b
+  let count = 0
+  while (xor > 0n) {
+    count += Number(xor & 1n)
+    xor >>= 1n
+  }
+  return count
+}
+
+interface ThumbnailResult {
+  resultIndex: number
+  buffer: Uint8Array
+  mime: string
+  hash: bigint
+  pixels: number
+}
+
+function deduplicate(results: ThumbnailResult[]): { winner: ThumbnailResult; indices: number[] }[] {
+  const n = results.length
+  const parent = results.map((_, i) => i)
+
+  function find(x: number): number {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]]
+      x = parent[x]
+    }
+    return x
+  }
+
+  function union(a: number, b: number): void {
+    parent[find(a)] = find(b)
+  }
+
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (hammingDistance(results[i].hash, results[j].hash) <= DHASH_THRESHOLD) {
+        union(i, j)
+      }
+    }
+  }
+
+  const groupMap = new Map<number, ThumbnailResult[]>()
+  for (let i = 0; i < n; i++) {
+    const root = find(i)
+    if (!groupMap.has(root)) groupMap.set(root, [])
+    groupMap.get(root)!.push(results[i])
+  }
+
+  return Array.from(groupMap.values()).map((items) => {
+    items.sort((a, b) => b.pixels - a.pixels)
+    return {
+      winner: items[0],
+      indices: items.map((i) => i.resultIndex).sort((a, b) => a - b),
+    }
+  })
+}
+
+function formatIndices(indices: number[]): string {
+  if (indices.length === 0) return ""
+  const parts: string[] = []
+  let start = indices[0]
+  let end = indices[0]
+  for (let i = 1; i < indices.length; i++) {
+    if (indices[i] === end + 1) {
+      end = indices[i]
+    } else {
+      parts.push(start === end ? `${start}` : `${start}-${end}`)
+      start = indices[i]
+      end = indices[i]
+    }
+  }
+  parts.push(start === end ? `${start}` : `${start}-${end}`)
+  return parts.join(",")
 }
 
 const imageSearchTool = tool({
@@ -203,22 +311,50 @@ const imageSearchTool = tool({
       const thumbnailUrls = extractThumbnails(text).slice(0, limit)
       if (thumbnailUrls.length === 0) return text
 
-      const attachments: ToolAttachment[] = []
+      const downloads: { resultIndex: number; buffer: Uint8Array; mime: string }[] = []
       for (let i = 0; i < thumbnailUrls.length; i++) {
         try {
-          const { mime, data } = await fetchImageAsDataUrl(
+          const { buffer, mime } = await fetchImageAsBuffer(
             thumbnailUrls[i],
             context.abort,
           )
-          attachments.push({
-            type: "file",
-            mime,
-            url: data,
-            filename: `result_${i + 1}.${mime.split("/")[1] || "jpg"}`,
-          })
+          downloads.push({ resultIndex: i + 1, buffer, mime })
         } catch {
           // skip thumbnails that fail to download
         }
+      }
+
+      if (downloads.length === 0) return text
+
+      const results: ThumbnailResult[] = []
+      for (const dl of downloads) {
+        const ph = await perceptualHash(dl.buffer)
+        if (ph) {
+          results.push({
+            resultIndex: dl.resultIndex,
+            buffer: dl.buffer,
+            mime: dl.mime,
+            hash: ph.hash,
+            pixels: ph.width * ph.height,
+          })
+        }
+      }
+
+      if (results.length === 0) return text
+
+      const groups = deduplicate(results)
+
+      const attachments: ToolAttachment[] = []
+      for (const group of groups) {
+        const { winner, indices } = group
+        const ext = winner.mime.split("/")[1] || "jpg"
+        const base64 = Buffer.from(winner.buffer).toString("base64")
+        attachments.push({
+          type: "file",
+          mime: winner.mime,
+          url: `data:${winner.mime};base64,${base64}`,
+          filename: `result-${formatIndices(indices)}.${ext}`,
+        })
       }
 
       return { output: text, attachments }

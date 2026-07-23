@@ -40,6 +40,52 @@ mock.module("bun:sqlite", () => ({
   },
 }))
 
+// --- cross-image mock ---
+;(globalThis as any).__crossImageDecodeState = {
+  presets: [] as { hash: bigint; width: number; height: number }[],
+  index: 0,
+}
+
+function makePixelData(hash: bigint): Uint8Array {
+  const pixelCount = 9 * 8
+  const data = new Uint8Array(pixelCount * 4)
+  for (let y = 0; y < 8; y++) {
+    let value = 150
+    for (let x = 0; x < 9; x++) {
+      const idx = (y * 9 + x) * 4
+      if (x > 0) {
+        const bit = (hash >> BigInt(y * 8 + (x - 1))) & 1n
+        value += bit === 1n ? -10 : 10
+      }
+      const clamped = Math.max(0, Math.min(255, value))
+      data[idx] = clamped
+      data[idx + 1] = clamped
+      data[idx + 2] = clamped
+      data[idx + 3] = 255
+    }
+  }
+  return data
+}
+
+mock.module("cross-image", () => ({
+  Image: {
+    decode: mock(async (_data: Uint8Array) => {
+      const state = (globalThis as any).__crossImageDecodeState
+      const preset = state.presets[state.index++] ?? { hash: 0n, width: 100, height: 100 }
+      return {
+        width: preset.width,
+        height: preset.height,
+        data: makePixelData(preset.hash),
+        resize: mock(function (this: any, opts: any) {
+          this.width = opts.width
+          this.height = opts.height
+          return this
+        }),
+      }
+    }),
+  },
+}))
+
 import { imageSearchTool, getDbDir } from "./src/index"
 
 // --- Helpers ---
@@ -106,6 +152,7 @@ const originalFetch = globalThis.fetch
 afterEach(() => {
   Bun.spawn = originalSpawn
   globalThis.fetch = originalFetch
+  ;(globalThis as any).__crossImageDecodeState.index = 0
 })
 
 function mockSpawn(responses: string[]) {
@@ -157,6 +204,20 @@ describe("getDbDir", () => {
 describe("image_search", () => {
   beforeEach(() => {
     mockRows = []
+    ;(globalThis as any).__crossImageDecodeState = {
+      presets: [],
+      index: 0,
+    }
+  })
+
+  it("cross-image mock is active and makePixelData is callable", async () => {
+    const { Image } = await import("cross-image")
+    ;(globalThis as any).__crossImageDecodeState.presets = [
+      { hash: 111n, width: 50, height: 100 },
+    ]
+    const img = await Image.decode(new Uint8Array(1))
+    expect(img.width).toBe(50)
+    expect(img.height).toBe(100)
   })
 
   it("returns message when no images in session", async () => {
@@ -270,6 +331,10 @@ describe("image_search", () => {
       ]),
     ])
     mockFetchOk()
+    ;(globalThis as any).__crossImageDecodeState.presets = [
+      { hash: 0n, width: 100, height: 100 },
+      { hash: 0xFFFFFFFFFFFFFFFFn, width: 100, height: 100 },
+    ]
 
     const result = await imageSearchTool.execute({}, SESSION) as any
     expect(result.output).toContain("Search Engine: Yandex")
@@ -279,8 +344,8 @@ describe("image_search", () => {
     expect(result.attachments[0].type).toBe("file")
     expect(result.attachments[0].mime).toBe("image/png")
     expect(result.attachments[0].url).toStartWith("data:image/png;base64,")
-    expect(result.attachments[0].filename).toBe("result_1.png")
-    expect(result.attachments[1].filename).toBe("result_2.png")
+    expect(result.attachments[0].filename).toBe("result-1.png")
+    expect(result.attachments[1].filename).toBe("result-2.png")
   })
 
   it("caps attachments to the requested limit", async () => {
@@ -294,9 +359,13 @@ describe("image_search", () => {
       ]),
     ])
     mockFetchOk()
+    ;(globalThis as any).__crossImageDecodeState.presets = [
+      { hash: 111n, width: 100, height: 100 },
+    ]
 
     const result = await imageSearchTool.execute({ limit: 1 }, SESSION) as any
     expect(result.attachments).toHaveLength(1)
+    expect(result.attachments[0].filename).toBe("result-1.png")
     expect(result.output).toContain("R1")
     expect(result.output).toContain("R2") // text still has all results
     expect(result.output).toContain("R3")
@@ -324,6 +393,143 @@ describe("image_search", () => {
 
     const result = await imageSearchTool.execute({}, SESSION) as any
     expect(result.attachments).toHaveLength(1)
-    expect(result.attachments[0].filename).toBe("result_1.png")
+    expect(result.attachments[0].filename).toBe("result-1.png")
+  })
+
+  it("deduplicates identical thumbnails into one attachment", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"))
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "A", thumbnail: "https://example.com/a.jpg" },
+        { title: "B", thumbnail: "https://example.com/b.jpg" },
+      ]),
+    ])
+    mockFetchOk()
+    ;(globalThis as any).__crossImageDecodeState.presets = [
+      { hash: 123n, width: 100, height: 100 },
+      { hash: 123n, width: 100, height: 100 },
+    ]
+
+    const result = await imageSearchTool.execute({}, SESSION) as any
+    expect(result.attachments).toHaveLength(1)
+    expect(result.attachments[0].filename).toBe("result-1-2.png")
+  })
+
+  it("keeps separate attachments for different thumbnails", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"))
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "A", thumbnail: "https://example.com/a.jpg" },
+        { title: "B", thumbnail: "https://example.com/b.jpg" },
+      ]),
+    ])
+    mockFetchOk()
+    ;(globalThis as any).__crossImageDecodeState.presets = [
+      { hash: 0n, width: 100, height: 100 },
+      { hash: 0xFFFFFFFFFFFFFFFFn, width: 100, height: 100 },
+    ]
+
+    const result = await imageSearchTool.execute({}, SESSION) as any
+    expect(result.attachments).toHaveLength(2)
+    expect(result.attachments[0].filename).toBe("result-1.png")
+    expect(result.attachments[1].filename).toBe("result-2.png")
+  })
+
+  it("groups non-consecutive duplicates correctly", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"))
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "A", thumbnail: "https://example.com/a.jpg" },
+        { title: "B", thumbnail: "https://example.com/b.jpg" },
+        { title: "C", thumbnail: "https://example.com/c.jpg" },
+      ]),
+    ])
+    mockFetchOk()
+    ;(globalThis as any).__crossImageDecodeState.presets = [
+      { hash: 0n, width: 100, height: 100 },
+      { hash: 0xFFFFFFFFFFFFFFFFn, width: 100, height: 100 },
+      { hash: 0n, width: 100, height: 100 },
+    ]
+
+    const result = await imageSearchTool.execute({}, SESSION) as any
+    expect(result.attachments).toHaveLength(2)
+    expect(result.attachments[0].filename).toBe("result-1,3.png")
+    expect(result.attachments[1].filename).toBe("result-2.png")
+  })
+
+  it("picks highest resolution thumbnail from each duplicate group", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"))
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "Small", thumbnail: "https://example.com/small.jpg" },
+        { title: "Large", thumbnail: "https://example.com/large.jpg" },
+      ]),
+    ])
+    mockFetchOk()
+    ;(globalThis as any).__crossImageDecodeState.presets = [
+      { hash: 456n, width: 50, height: 50 },
+      { hash: 456n, width: 200, height: 200 },
+    ]
+
+    const result = await imageSearchTool.execute({}, SESSION) as any
+    expect(result.attachments).toHaveLength(1)
+
+    const bytes = Buffer.from(
+      result.attachments[0].url.slice("data:image/png;base64,".length),
+      "base64",
+    )
+    expect(bytes).toEqual(MINI_PNG)
+  })
+
+  it("groups transitively: A↔B and B↔C but not A↔C are still merged via B", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"))
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "A", thumbnail: "https://example.com/a.jpg" },
+        { title: "B", thumbnail: "https://example.com/b.jpg" },
+        { title: "C", thumbnail: "https://example.com/c.jpg" },
+      ]),
+    ])
+    mockFetchOk()
+    ;(globalThis as any).__crossImageDecodeState.presets = [
+      { hash: 0n, width: 50, height: 50 },
+      { hash: 1023n, width: 200, height: 200 },
+      { hash: 1047552n, width: 100, height: 100 },
+    ]
+
+    const result = await imageSearchTool.execute({}, SESSION) as any
+    expect(result.attachments).toHaveLength(1)
+    expect(result.attachments[0].filename).toBe("result-1-3.png")
+  })
+
+  it("formats a run of 5 consecutive duplicates as a range", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"))
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "A", thumbnail: "https://example.com/a.jpg" },
+        { title: "B", thumbnail: "https://example.com/b.jpg" },
+        { title: "C", thumbnail: "https://example.com/c.jpg" },
+        { title: "D", thumbnail: "https://example.com/d.jpg" },
+        { title: "E", thumbnail: "https://example.com/e.jpg" },
+      ]),
+    ])
+    mockFetchOk()
+    ;(globalThis as any).__crossImageDecodeState.presets = [
+      { hash: 999n, width: 100, height: 100 },
+      { hash: 999n, width: 100, height: 100 },
+      { hash: 999n, width: 100, height: 100 },
+      { hash: 999n, width: 100, height: 100 },
+      { hash: 999n, width: 100, height: 100 },
+    ]
+
+    const result = await imageSearchTool.execute({}, SESSION) as any
+    expect(result.attachments).toHaveLength(1)
+    expect(result.attachments[0].filename).toBe("result-1-5.png")
   })
 })

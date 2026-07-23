@@ -33,11 +33,11 @@ jobs:
         run: |
           bunx biome ci . --reporter=checkstyle > .biome-report.xml 2>&1 || true
       - name: Post results
+        if: always()
         env:
           REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          reviewdog -f=checkstyle -name="Biome" -reporter=github-pr-review -fail-level=error < .biome-report.xml
-        if: always()
+          [ -s .biome-report.xml ] && reviewdog -f=checkstyle -name="Biome" -reporter=github-pr-review -fail-level=error < .biome-report.xml
 
   semgrep:
     runs-on: ubuntu-latest
@@ -46,12 +46,19 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - uses: g-wilson/action-semgrep@v1
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-review
-          level: warning
-          semgrep_config: p/default
+          fetch-depth: 0
+      - uses: reviewdog/action-setup@v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install semgrep
+      - name: Semgrep scan
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          semgrep --config=p/default --json . 2>/dev/null | \
+            reviewdog -f=semgrep -name="Semgrep" -reporter=github-pr-review -level=warning
 
   policy:
     if: github.event_name == 'pull_request'
@@ -98,11 +105,11 @@ jobs:
             const report = findings.map(f => JSON.stringify({ source: { name: 'check-files' }, ...f })).join('\n');
             fs.writeFileSync('.reviewdog-report.jsonl', report);
       - name: Post results
+        if: always()
         env:
           REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          reviewdog -f=rdjsonl -name="check-files" -reporter=github-pr-review -fail-level=error < .reviewdog-report.jsonl
-        if: always()
+          [ -s .reviewdog-report.jsonl ] && reviewdog -f=rdjsonl -name="check-files" -reporter=github-pr-review -fail-level=error < .reviewdog-report.jsonl
 
   codeql:
     runs-on: ubuntu-latest

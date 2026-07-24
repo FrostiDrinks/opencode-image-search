@@ -55,7 +55,11 @@ async function run({ github, context, dryRun, findingsDir, needs }) {
     }
   }
 
-  const failedJobs = needs ? Object.entries(needs).filter(([, v]) => v.result !== 'success').map(([k]) => k) : [];
+  let failedJobs = [];
+  if (process.env.NEEDS_JSON) {
+    const needs = JSON.parse(process.env.NEEDS_JSON);
+    failedJobs = Object.entries(needs).filter(([, v]) => v.result !== 'success').map(([k]) => k);
+  }
   const body = formatFindings(allFindings, failedJobs);
 
   if (dryRun) {

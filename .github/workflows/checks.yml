@@ -132,10 +132,12 @@ jobs:
           path: ./findings
           merge-multiple: true
       - uses: actions/github-script@v7
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
         with:
           script: |
             const { run } = require('./.github/scripts/submit-report.cjs');
-            await run({ github, context, needs });
+            await run({ github, context });
 
   codeql:
     runs-on: ubuntu-latest

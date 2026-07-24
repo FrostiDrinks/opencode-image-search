@@ -4,6 +4,7 @@ const path = require('path');
 module.exports = { run, formatFindings };
 
 const MARKER = '<!-- reviewdog-summary -->';
+const SPLIT = '<!-- split-summary -->';
 
 function formatFindings(allFindings) {
   let body = '## Code Quality Report\n\n';
@@ -17,6 +18,8 @@ function formatFindings(allFindings) {
   } else {
     body += '### ✅ PASS\n\n';
   }
+
+  body += SPLIT + '\n\n';
 
   if (allFindings.length > 0) {
     const groups = { ERROR: [], WARNING: [], 'Non-blocker': [] };
@@ -34,7 +37,7 @@ function formatFindings(allFindings) {
     for (const { key, icon, label } of labels) {
       const fs = groups[key];
       if (fs.length === 0) continue;
-      body += `<details>\n<summary>${icon} ${label} (${fs.length})</summary>\n\n`;
+      body += `<details open>\n<summary>${icon} ${label} (${fs.length})</summary>\n\n`;
       body += '| Source | File | Line | Message |\n';
       body += '|--------|------|------|---------|\n';
       for (const f of fs) {
@@ -81,14 +84,14 @@ async function run({ github, context, dryRun, findingsDir }) {
   const existing = comments.find(c => c.body && c.body.includes(MARKER));
 
   if (existing) {
-    const sepIdx = existing.body.indexOf('\n<details>');
+    const sepIdx = existing.body.indexOf('\n' + SPLIT + '\n');
     if (sepIdx !== -1) {
       const before = existing.body.slice(0, sepIdx).trim();
       const lines = before.split('\n');
       const summaryLine = lines.pop().trim();
       const header = lines.join('\n').trim();
-      const content = existing.body.slice(sepIdx).trim().replace(MARKER, '').trim();
-      const collapsed = header + '\n\n<details><summary>' + summaryLine + '</summary>\n\n' + content + '\n\n</details>';
+      const after = existing.body.slice(sepIdx + SPLIT.length + 2).trim().replace(MARKER, '').trim();
+      const collapsed = header + '\n\n<details><summary>' + summaryLine + '</summary>\n\n' + after + '\n\n</details>';
       await github.rest.issues.updateComment({
         ...context.repo,
         comment_id: existing.id,

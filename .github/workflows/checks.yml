@@ -20,6 +20,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     permissions:
+      checks: write
       pull-requests: write
       contents: read
     steps:
@@ -38,8 +39,17 @@ jobs:
           REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -s .biome-report.xml ]; then
-            reviewdog -f=checkstyle -name="Biome" -reporter=github-pr-review -fail-level=error < .biome-report.xml
+            reviewdog -f=checkstyle -name="Biome" -reporter=github-pr-check -fail-level=error < .biome-report.xml
+            reviewdog -f=checkstyle -reporter=rdjsonl -name="Biome" < .biome-report.xml > .biome.rdjsonl
+          else
+            touch .biome.rdjsonl
           fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reviewdog-biome-rdjsonl
+          path: .biome.rdjsonl
+          if-no-files-found: ignore
 
   semgrep:
     runs-on: ubuntu-latest
@@ -60,13 +70,25 @@ jobs:
         env:
           REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          semgrep --config=p/default --sarif . 2>/dev/null | \
-            reviewdog -f=sarif -name="Semgrep" -reporter=github-pr-check -level=warning
+          semgrep --config=p/default --sarif . 2>/dev/null > .semgrep.sarif || true
+          if [ -s .semgrep.sarif ]; then
+            reviewdog -f=sarif -name="Semgrep" -reporter=github-pr-check -level=warning < .semgrep.sarif
+            reviewdog -f=sarif -reporter=rdjsonl -name="Semgrep" < .semgrep.sarif > .semgrep.rdjsonl
+          else
+            touch .semgrep.rdjsonl
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reviewdog-semgrep-rdjsonl
+          path: .semgrep.rdjsonl
+          if-no-files-found: ignore
 
   policy:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
+      checks: write
       pull-requests: write
       contents: read
     steps:
@@ -75,46 +97,41 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const fs = require('fs');
-            const findings = [];
-            const { data: files } = await github.rest.pulls.listFiles({
-              ...context.repo,
-              pull_number: context.issue.number,
-            });
-            const modified = files.map(f => f.filename);
-            const srcChanges = modified.filter(f => f.startsWith('src/'));
-            const testChanges = modified.filter(f => f.endsWith('.test.ts'));
-            if (srcChanges.length > 0 && testChanges.length === 0) {
-              findings.push({
-                message: 'Source files under `src/` were modified, but no test file (`*.test.ts`) appears in these changes. Please verify test coverage for compliancy.',
-                location: { path: srcChanges[0], range: { start: { line: 1 } } },
-                severity: 'INFO',
-              });
-            }
-            const pkgFile = files.find(f => f.filename === 'package.json');
-            const lockChanged = modified.includes('bun.lock');
-            if (pkgFile && !lockChanged) {
-              const depFields = ['"dependencies"', '"devDependencies"', '"peerDependencies"', '"optionalDependencies"', '"overrides"'];
-              const patch = pkgFile.patch || '';
-              const depsTouched = depFields.some(f => patch.includes(f));
-              if (depsTouched) {
-                findings.push({
-                  message: '`package.json` dependency fields were changed but `bun.lock` was not updated. Run `bun install` to update the lockfile.',
-                  location: { path: 'package.json', range: { start: { line: 1 } } },
-                  severity: 'ERROR',
-                });
-              }
-            }
-            const report = findings.map(f => JSON.stringify({ source: { name: 'check-files' }, ...f })).join('\n');
-            fs.writeFileSync('.reviewdog-report.jsonl', report);
+            const { run } = require('./.github/scripts/policy-checks.cjs');
+            await run({ github, context });
       - name: Post results
         if: always()
         env:
           REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -s .reviewdog-report.jsonl ]; then
-            reviewdog -f=rdjsonl -name="check-files" -reporter=github-pr-review -fail-level=error < .reviewdog-report.jsonl
+            reviewdog -f=rdjsonl -name="check-files" -reporter=github-pr-check -fail-level=error < .reviewdog-report.jsonl
           fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reviewdog-policy-rdjsonl
+          path: .reviewdog-report.jsonl
+          if-no-files-found: ignore
+
+  report:
+    if: always() && github.event_name == 'pull_request'
+    needs: [lint, semgrep, policy]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: reviewdog-*-rdjsonl
+          path: ./findings
+          merge-multiple: true
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { run } = require('./.github/scripts/submit-report.cjs');
+            await run({ github, context });
 
   codeql:
     runs-on: ubuntu-latest

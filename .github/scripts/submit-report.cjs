@@ -4,22 +4,20 @@ const path = require('path');
 module.exports = { run, formatFindings };
 
 const MARKER = '<!-- reviewdog-summary -->';
-const SPLIT = '<!-- split-summary -->';
 
 function formatFindings(allFindings) {
-  let body = '## Code Quality Report\n\n';
+  let body = '<h1>Code Quality Report</h1>\n\n';
 
   if (allFindings.length > 0) {
     const hasErrors = allFindings.some(f => f.severity === 'ERROR');
     const hasWarnings = allFindings.some(f => f.severity === 'WARNING');
-    body += hasErrors ? '### ❌ ERROR\n\n'
-         : hasWarnings ? '### 🟡 WARNING\n\n'
-         :                '### ☑️ NOTICE\n\n';
+    body += '<details open><summary><h2>'
+         + (hasErrors ? '❌ ERROR' : hasWarnings ? '🟡 WARNING' : '☑️ NOTICE')
+         + '</h2></summary>\n\n';
+    body += '<h3>Details:</h3>\n\n';
   } else {
-    body += '### ✅ PASS\n\n';
+    body += '✅ PASS\n\n';
   }
-
-  body += SPLIT + '\n\n';
 
   if (allFindings.length > 0) {
     const groups = { ERROR: [], WARNING: [], 'Non-blocker': [] };
@@ -38,17 +36,19 @@ function formatFindings(allFindings) {
       const fs = groups[key];
       if (fs.length === 0) continue;
       body += `<details open>\n<summary>${icon} ${label} (${fs.length})</summary>\n\n`;
-      body += '| Source | File | Line | Message |\n';
-      body += '|--------|------|------|---------|\n';
+      body += '| Source | Location | Message |\n';
+      body += '|--------|----------|---------|\n';
       for (const f of fs) {
         const source = (f.source && f.source.name) || 'Unknown';
         const file = (f.location && f.location.path) || 'unknown';
         const line = (f.location && f.location.range && f.location.range.start && f.location.range.start.line) || '?';
         const msg = f.message || '';
-        body += `| ${source} | \`${file}\` | ${line} | ${msg} |\n`;
+        body += `| ${source} | \`${file}:${line}\` | ${msg} |\n`;
       }
       body += '\n</details>\n\n';
     }
+
+    body += '</details>\n';
   }
 
   return body + MARKER;
@@ -84,20 +84,11 @@ async function run({ github, context, dryRun, findingsDir }) {
   const existing = comments.find(c => c.body && c.body.includes(MARKER));
 
   if (existing) {
-    const sepIdx = existing.body.indexOf('\n' + SPLIT + '\n');
-    if (sepIdx !== -1) {
-      const before = existing.body.slice(0, sepIdx).trim();
-      const lines = before.split('\n');
-      const summaryLine = lines.pop().trim();
-      const header = lines.join('\n').trim();
-      const after = existing.body.slice(sepIdx + SPLIT.length + 2).trim().replace(MARKER, '').trim();
-      const collapsed = header + '\n\n<details><summary>' + summaryLine + '</summary>\n\n' + after + '\n\n</details>';
-      await github.rest.issues.updateComment({
-        ...context.repo,
-        comment_id: existing.id,
-        body: collapsed,
-      });
-    }
+    await github.rest.issues.updateComment({
+      ...context.repo,
+      comment_id: existing.id,
+      body: existing.body.replace(/<details open>/g, '<details>'),
+    });
   }
   await github.rest.issues.createComment({
     ...context.repo,

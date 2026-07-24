@@ -10,9 +10,141 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: latest
       - run: bun install
       - run: bun test
+
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: latest
+      - run: bun install
+      - uses: reviewdog/action-setup@19ad6fc8b7358ccdc9fd4a25c75dd93eeb097e1e
+      - name: Biome check
+        run: |
+          bunx biome ci . --reporter=checkstyle 2>/dev/null > .biome-report.xml || true
+      - name: Post results
+        if: always()
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -s .biome-report.xml ]; then
+            reviewdog -f=checkstyle -name="Biome" -reporter=github-pr-check -fail-level=error < .biome-report.xml
+            reviewdog -f=checkstyle -reporter=rdjsonl -name="Biome" < .biome-report.xml > biome.rdjsonl
+          else
+            touch biome.rdjsonl
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: reviewdog-biome-rdjsonl
+          path: biome.rdjsonl
+          if-no-files-found: ignore
+
+  semgrep:
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: reviewdog/action-setup@19ad6fc8b7358ccdc9fd4a25c75dd93eeb097e1e
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - run: pip install semgrep
+      - name: Semgrep scan
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          semgrep --config=p/default --sarif . 2>/dev/null > .semgrep.sarif || true
+          if [ -s .semgrep.sarif ]; then
+            reviewdog -f=sarif -name="Semgrep" -reporter=github-pr-check -level=warning < .semgrep.sarif
+            reviewdog -f=sarif -reporter=rdjsonl -name="Semgrep" < .semgrep.sarif > semgrep.rdjsonl
+          else
+            touch semgrep.rdjsonl
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: reviewdog-semgrep-rdjsonl
+          path: semgrep.rdjsonl
+          if-no-files-found: ignore
+
+  policy:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: reviewdog/action-setup@19ad6fc8b7358ccdc9fd4a25c75dd93eeb097e1e
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const { run } = require('./.github/scripts/policy-checks.cjs');
+            await run({ github, context });
+      - name: Post results
+        if: always()
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -s .reviewdog-report.jsonl ]; then
+            reviewdog -f=rdjsonl -name="check-files" -reporter=github-pr-check -fail-level=error < .reviewdog-report.jsonl
+            cp .reviewdog-report.jsonl policy.rdjsonl
+          else
+            touch policy.rdjsonl
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: reviewdog-policy-rdjsonl
+          path: policy.rdjsonl
+          if-no-files-found: ignore
+
+  report:
+    if: github.event_name == 'pull_request'
+    needs: [test, lint, semgrep, policy, codeql]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: reviewdog-*-rdjsonl
+          path: ./findings
+          merge-multiple: true
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const { run } = require('./.github/scripts/submit-report.cjs');
+            await run({ github, context });
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: github/codeql-action/init@3b0bd1d116c0bde30213346b22d4f634d96a2fb0
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/analyze@3b0bd1d116c0bde30213346b22d4f634d96a2fb0

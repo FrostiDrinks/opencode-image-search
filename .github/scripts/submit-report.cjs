@@ -16,7 +16,9 @@ function formatFindings(allFindings) {
          + '</h2></summary>\n\n';
     body += '<h3>Details:</h3>\n\n';
   } else {
-    body += '✅ PASS\n\n';
+    body += '<details open><summary><h2>✅ PASS</h2></summary>\n\n';
+    body += '<h3>No issues found.</h3>\n\n';
+    body += '</details>\n';
   }
 
   if (allFindings.length > 0) {

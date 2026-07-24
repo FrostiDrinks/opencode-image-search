@@ -95,4 +95,10 @@ async function run({ github, context, dryRun, findingsDir }) {
     issue_number: context.issue.number,
     body,
   });
+
+  const hasErrors = allFindings.some(f => f.severity === 'ERROR');
+  const hasWarnings = allFindings.some(f => f.severity === 'WARNING');
+  if (hasErrors || hasWarnings) {
+    throw new Error('Code Quality Report: ' + (hasErrors ? 'errors' : 'warnings') + ' found');
+  }
 }

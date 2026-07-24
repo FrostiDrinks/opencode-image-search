@@ -9,18 +9,14 @@ function formatFindings(allFindings) {
   let body = '## Code Quality Report\n\n';
 
   if (allFindings.length > 0) {
-    const errs = allFindings.filter(f => f.severity === 'ERROR').length;
-    const warns = allFindings.filter(f => f.severity === 'WARNING').length;
-    const infos = allFindings.length - errs - warns;
-    if (errs > 0) body += '🛑 ' + errs + ' error(s)\n';
-    if (warns > 0) body += '⚠️ ' + warns + ' warning(s)\n';
-    if (infos > 0) body += '📄 ' + infos + ' notice(s)\n';
-    body += '\n';
+    const hasErrors = allFindings.some(f => f.severity === 'ERROR');
+    const hasWarnings = allFindings.some(f => f.severity === 'WARNING');
+    body += hasErrors ? '### ❌ ERROR\n\n'
+         : hasWarnings ? '### 🟡 WARNING\n\n'
+         :                '### ☑️ NOTICE\n\n';
   } else {
-    body += 'All checks passed.\n\n';
+    body += '### ✅ PASS\n\n';
   }
-
-  body += '---\n\n';
 
   if (allFindings.length > 0) {
     const groups = { ERROR: [], WARNING: [], 'Non-blocker': [] };
@@ -85,14 +81,14 @@ async function run({ github, context, dryRun, findingsDir }) {
   const existing = comments.find(c => c.body && c.body.includes(MARKER));
 
   if (existing) {
-    const sepIdx = existing.body.indexOf('\n---\n');
+    const sepIdx = existing.body.indexOf('\n<details>');
     if (sepIdx !== -1) {
-      const summary = existing.body.slice(0, sepIdx).trim();
-      const content = existing.body.slice(sepIdx + 5).trim().replace(MARKER, '').trim();
-      let collapsed = summary + '\n\n---\n\n';
-      if (content) {
-        collapsed += '<details>\n\n' + content + '\n\n</details>';
-      }
+      const before = existing.body.slice(0, sepIdx).trim();
+      const lines = before.split('\n');
+      const summaryLine = lines.pop().trim();
+      const header = lines.join('\n').trim();
+      const content = existing.body.slice(sepIdx).trim().replace(MARKER, '').trim();
+      const collapsed = header + '\n\n<details><summary>' + summaryLine + '</summary>\n\n' + content + '\n\n</details>';
       await github.rest.issues.updateComment({
         ...context.repo,
         comment_id: existing.id,

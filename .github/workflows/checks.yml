@@ -40,15 +40,15 @@ jobs:
         run: |
           if [ -s .biome-report.xml ]; then
             reviewdog -f=checkstyle -name="Biome" -reporter=github-pr-check -fail-level=error < .biome-report.xml
-            reviewdog -f=checkstyle -reporter=rdjsonl -name="Biome" < .biome-report.xml > .biome.rdjsonl
+            reviewdog -f=checkstyle -reporter=rdjsonl -name="Biome" < .biome-report.xml > biome.rdjsonl
           else
-            touch .biome.rdjsonl
+            touch biome.rdjsonl
           fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: reviewdog-biome-rdjsonl
-          path: .biome.rdjsonl
+          path: biome.rdjsonl
           if-no-files-found: ignore
 
   semgrep:
@@ -73,15 +73,15 @@ jobs:
           semgrep --config=p/default --sarif . 2>/dev/null > .semgrep.sarif || true
           if [ -s .semgrep.sarif ]; then
             reviewdog -f=sarif -name="Semgrep" -reporter=github-pr-check -level=warning < .semgrep.sarif
-            reviewdog -f=sarif -reporter=rdjsonl -name="Semgrep" < .semgrep.sarif > .semgrep.rdjsonl
+            reviewdog -f=sarif -reporter=rdjsonl -name="Semgrep" < .semgrep.sarif > semgrep.rdjsonl
           else
-            touch .semgrep.rdjsonl
+            touch semgrep.rdjsonl
           fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: reviewdog-semgrep-rdjsonl
-          path: .semgrep.rdjsonl
+          path: semgrep.rdjsonl
           if-no-files-found: ignore
 
   policy:
@@ -106,12 +106,15 @@ jobs:
         run: |
           if [ -s .reviewdog-report.jsonl ]; then
             reviewdog -f=rdjsonl -name="check-files" -reporter=github-pr-check -fail-level=error < .reviewdog-report.jsonl
+            cp .reviewdog-report.jsonl policy.rdjsonl
+          else
+            touch policy.rdjsonl
           fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: reviewdog-policy-rdjsonl
-          path: .reviewdog-report.jsonl
+          path: policy.rdjsonl
           if-no-files-found: ignore
 
   report:

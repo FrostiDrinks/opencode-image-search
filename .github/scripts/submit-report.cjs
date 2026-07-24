@@ -89,6 +89,12 @@ async function run({ github, context, dryRun, findingsDir }) {
     ...context.repo,
     issue_number: context.issue.number,
   });
+
+  const lastReport = [...comments].reverse().find(c => c.body && c.body.includes(MARKER));
+  if (lastReport && lastReport.body === body) {
+    return body;
+  }
+
   const existing = comments.find(c => c.body && c.body.includes(MARKER));
 
   if (existing) {

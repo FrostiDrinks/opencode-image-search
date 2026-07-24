@@ -147,4 +147,8 @@ jobs:
       - uses: github/codeql-action/init@3b0bd1d116c0bde30213346b22d4f634d96a2fb0
         with:
           languages: javascript-typescript
+          build-mode: none
+          paths-ignore: |
+            node_modules
+            dist
       - uses: github/codeql-action/analyze@3b0bd1d116c0bde30213346b22d4f634d96a2fb0

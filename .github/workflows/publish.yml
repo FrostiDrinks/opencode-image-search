@@ -8,10 +8,15 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  checks:
+    permissions:
+      checks: write
+      pull-requests: write
+      security-events: write
+      contents: read
     uses: ./.github/workflows/checks.yml
   publish:
-    needs: test
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

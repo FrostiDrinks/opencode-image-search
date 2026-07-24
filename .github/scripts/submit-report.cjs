@@ -13,8 +13,8 @@ function formatFindings(allFindings) {
     const hasWarnings = allFindings.some(f => f.severity === 'WARNING');
     body += '<details open><summary><h2>'
          + (hasErrors ? '❌ ERROR' : hasWarnings ? '🟡 WARNING' : '☑️ NOTICE')
-         + '</h2></summary>\n\n';
-    body += '<h3>Details:</h3>\n\n';
+         + '</h2></summary>\n';
+    body += '<h2>Details:</h2>\n';
   } else {
     body += '<details open><summary><h2>✅ PASS</h2></summary>\n\n';
     body += '<h3>No issues found.</h3>\n\n';
@@ -37,17 +37,24 @@ function formatFindings(allFindings) {
     for (const { key, icon, label } of labels) {
       const fs = groups[key];
       if (fs.length === 0) continue;
-      body += `<details open>\n<summary>${icon} ${label} (${fs.length})</summary>\n\n`;
-      body += '| Location | Message |\n';
-      body += '|----------|---------|\n';
+      const fileGroups = {};
       for (const f of fs) {
-        const source = (f.source && f.source.name) || 'Unknown';
         const file = (f.location && f.location.path) || 'unknown';
-        const line = (f.location && f.location.range && f.location.range.start && f.location.range.start.line) || '?';
-        const msg = f.message || '';
-        body += `| \`${file}:${line}\` | ${msg} |\n`;
+        if (!fileGroups[file]) fileGroups[file] = [];
+        fileGroups[file].push(f);
       }
-      body += '\n</details>\n\n';
+
+      body += `<details open>\n<summary><h3>${icon} ${label} (${fs.length})</h3></summary>\n`;
+      for (const [file, findings] of Object.entries(fileGroups)) {
+        body += `<b>${icon} ${file}:</b>\n<pre>\n`;
+        for (const f of findings) {
+          const line = (f.location && f.location.range && f.location.range.start && f.location.range.start.line) || '?';
+          const msg = f.message || '';
+          body += `Line ${line}: ${msg}\n`;
+        }
+        body += `</pre>\n`;
+      }
+      body += `</details>\n\n`;
     }
 
     body += '</details>\n';
@@ -88,10 +95,14 @@ async function run({ github, context, dryRun, findingsDir }) {
   if (existing) {
     for (const c of comments) {
       if (c.body && c.body.includes(MARKER)) {
+        const openTag = '<details open><summary><h2>';
+        const body = c.body.includes(openTag)
+          ? c.body.replace(openTag, '<details><summary><h2>')
+          : c.body;
         await github.rest.issues.updateComment({
           ...context.repo,
           comment_id: c.id,
-          body: c.body.replace(/<details open>/g, '<details>'),
+          body,
         });
       }
     }

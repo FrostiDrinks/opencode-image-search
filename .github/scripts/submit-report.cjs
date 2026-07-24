@@ -85,6 +85,12 @@ async function run({ github, context, dryRun, findingsDir }) {
     return body;
   }
 
+  if (!context.issue || !context.issue.number) {
+    console.log('Not a pull request context — skipping report comment.');
+    console.log(body);
+    return body;
+  }
+
   const { data: comments } = await github.rest.issues.listComments({
     ...context.repo,
     issue_number: context.issue.number,

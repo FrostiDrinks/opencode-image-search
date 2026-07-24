@@ -12,7 +12,7 @@ function formatFindings(allFindings) {
     const hasErrors = allFindings.some(f => f.severity === 'ERROR');
     const hasWarnings = allFindings.some(f => f.severity === 'WARNING');
     body += '<details open><summary><h2>'
-         + (hasErrors ? '❌ ERROR' : hasWarnings ? '🟡 WARNING' : '☑️ NOTICE')
+         + (hasErrors ? '❌ ERROR' : hasWarnings ? '🟡 WARNING' : '❎ NOTICE')
          + '</h2></summary>\n';
     body += '<h2>Details:</h2>\n';
   } else {
@@ -44,9 +44,9 @@ function formatFindings(allFindings) {
         fileGroups[file].push(f);
       }
 
-      body += `<details open>\n<summary><h3>${icon} ${label} (${fs.length})</h3></summary>\n`;
+      body += `<h3>${icon} ${label} (${fs.length})</h3>\n`;
       for (const [file, findings] of Object.entries(fileGroups)) {
-        body += `<b>${icon} ${file}:</b>\n<pre>\n`;
+        body += `<b>${file}:</b>\n<pre>\n`;
         for (const f of findings) {
           const line = (f.location && f.location.range && f.location.range.start && f.location.range.start.line) || '?';
           const msg = f.message || '';
@@ -54,7 +54,6 @@ function formatFindings(allFindings) {
         }
         body += `</pre>\n`;
       }
-      body += `</details>\n\n`;
     }
 
     body += '</details>\n';

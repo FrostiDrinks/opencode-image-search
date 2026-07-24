@@ -36,14 +36,14 @@ function formatFindings(allFindings) {
       const fs = groups[key];
       if (fs.length === 0) continue;
       body += `<details open>\n<summary>${icon} ${label} (${fs.length})</summary>\n\n`;
-      body += '| Source | Location | Message |\n';
-      body += '|--------|----------|---------|\n';
+      body += '| Location | Message |\n';
+      body += '|----------|---------|\n';
       for (const f of fs) {
         const source = (f.source && f.source.name) || 'Unknown';
         const file = (f.location && f.location.path) || 'unknown';
         const line = (f.location && f.location.range && f.location.range.start && f.location.range.start.line) || '?';
         const msg = f.message || '';
-        body += `| ${source} | \`${file}:${line}\` | ${msg} |\n`;
+        body += `| \`${file}:${line}\` | ${msg} |\n`;
       }
       body += '\n</details>\n\n';
     }

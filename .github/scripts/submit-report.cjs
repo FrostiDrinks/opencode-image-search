@@ -84,11 +84,15 @@ async function run({ github, context, dryRun, findingsDir }) {
   const existing = comments.find(c => c.body && c.body.includes(MARKER));
 
   if (existing) {
-    await github.rest.issues.updateComment({
-      ...context.repo,
-      comment_id: existing.id,
-      body: existing.body.replace(/<details open>/g, '<details>'),
-    });
+    for (const c of comments) {
+      if (c.body && c.body.includes(MARKER)) {
+        await github.rest.issues.updateComment({
+          ...context.repo,
+          comment_id: c.id,
+          body: c.body.replace(/<details open>/g, '<details>'),
+        });
+      }
+    }
   }
   await github.rest.issues.createComment({
     ...context.repo,

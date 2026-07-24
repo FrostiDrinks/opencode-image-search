@@ -4,19 +4,20 @@ on:
     types: [published]
 
 permissions:
+  checks: write
+  pull-requests: write
+  security-events: write
   id-token: write
   contents: read
 
 jobs:
   checks:
-    permissions:
-      checks: write
-      pull-requests: write
-      security-events: write
-      contents: read
     uses: ./.github/workflows/checks.yml
   publish:
     needs: checks
+    permissions:
+      id-token: write
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

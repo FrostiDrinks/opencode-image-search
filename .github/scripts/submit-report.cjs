@@ -91,7 +91,8 @@ async function run({ github, context, dryRun, findingsDir }) {
   });
 
   const lastReport = [...comments].reverse().find(c => c.body && c.body.includes(MARKER));
-  if (lastReport && lastReport.body === body) {
+  const stripOpen = s => s.replace(/\r\n/g, '\n').replace('<details open>', '<details>');
+  if (lastReport && stripOpen(lastReport.body) === stripOpen(body)) {
     return body;
   }
 

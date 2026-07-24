@@ -119,7 +119,7 @@ jobs:
 
   report:
     if: always() && github.event_name == 'pull_request'
-    needs: [lint, semgrep, policy]
+    needs: [test, lint, semgrep, policy, codeql]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -135,7 +135,7 @@ jobs:
         with:
           script: |
             const { run } = require('./.github/scripts/submit-report.cjs');
-            await run({ github, context });
+            await run({ github, context, needs });
 
   codeql:
     runs-on: ubuntu-latest

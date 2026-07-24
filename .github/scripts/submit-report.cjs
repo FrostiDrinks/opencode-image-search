@@ -5,8 +5,11 @@ module.exports = { run, formatFindings };
 
 const MARKER = '<!-- reviewdog-summary -->';
 
-function formatFindings(allFindings) {
+function formatFindings(allFindings, failedJobs) {
   if (allFindings.length === 0) {
+    if (failedJobs && failedJobs.length > 0) {
+      return '## Code Quality Report\n\nChecks failed: ' + failedJobs.join(', ') + '. Review the check runs above for details.\n\n' + MARKER;
+    }
     return '## Code Quality Report\n\nNo issues found.\n\n' + MARKER;
   }
 
@@ -21,7 +24,7 @@ function formatFindings(allFindings) {
   for (const [name, fs] of Object.entries(grouped)) {
     const icon = fs.some(f => f.severity === 'ERROR') ? '🔴' :
                 fs.some(f => f.severity === 'WARNING') ? '🟡' : '🔵';
-    body += `### ${icon} ${name} (${fs.length})\n\n`;
+    body += `<details>\n<summary>${icon} ${name} (${fs.length})</summary>\n\n`;
     body += '| File | Line | Severity | Message |\n';
     body += '|------|------|----------|---------|\n';
     for (const f of fs) {
@@ -31,12 +34,12 @@ function formatFindings(allFindings) {
       const msg = f.message || '';
       body += `| \`${file}\` | ${line} | ${sev} | ${msg} |\n`;
     }
-    body += '\n';
+    body += '\n</details>\n\n';
   }
   return body + MARKER;
 }
 
-async function run({ github, context, dryRun, findingsDir }) {
+async function run({ github, context, dryRun, findingsDir, needs }) {
   if (!findingsDir) {
     findingsDir = path.join(process.env.GITHUB_WORKSPACE, 'findings');
   }
@@ -52,7 +55,8 @@ async function run({ github, context, dryRun, findingsDir }) {
     }
   }
 
-  const body = formatFindings(allFindings);
+  const failedJobs = needs ? Object.entries(needs).filter(([, v]) => v.result !== 'success').map(([k]) => k) : [];
+  const body = formatFindings(allFindings, failedJobs);
 
   if (dryRun) {
     console.log(body);

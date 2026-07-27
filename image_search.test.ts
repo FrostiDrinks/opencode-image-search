@@ -152,24 +152,6 @@ function imageRecord(url: string, filename: string) {
   };
 }
 
-const mcpInit = `${JSON.stringify({
-  jsonrpc: "2.0",
-  id: 1,
-  result: {
-    protocolVersion: "2024-11-05",
-    capabilities: {},
-    serverInfo: { name: "img", version: "1" },
-  },
-})}\n`;
-
-function mcpResult(text: string) {
-  return `${JSON.stringify({
-    jsonrpc: "2.0",
-    id: 2,
-    result: { content: [{ type: "text", text }] },
-  })}\n`;
-}
-
 const MINI_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
   "base64",
@@ -185,21 +167,20 @@ function mockFetchOk() {
   ) as unknown as typeof globalThis.fetch;
 }
 
-function mcpResultWithThumbnails(
-  engine: string,
-  results: { title: string; thumbnail: string; pageUrl?: string }[],
-) {
-  const lines = [
-    `Search Engine: ${engine}`,
-    `Found ${results.length} results (showing top ${results.length}):`,
-  ];
-  results.forEach((r, i) => {
-    const resultLines = ["", `--- Result ${i + 1} ---`, `Title: ${r.title}`];
-    if (r.pageUrl) resultLines.push(`URL: ${r.pageUrl}`);
-    resultLines.push(`Thumbnail: ${r.thumbnail}`);
-    lines.push(...resultLines);
-  });
-  return mcpResult(lines.join("\n"));
+interface JsonResult {
+  index: number;
+  title?: string;
+  url?: string;
+  thumbnail?: string;
+  source?: string;
+  size?: string;
+  width?: number;
+  height?: number;
+  similarity?: number;
+}
+
+function jsonResponse(engine: string, results: JsonResult[]) {
+  return JSON.stringify({ engine, count: results.length, results });
 }
 
 const originalSpawn = Bun.spawn;
@@ -212,16 +193,17 @@ afterEach(() => {
   globalThis.__hashMockState.index = 0;
 });
 
-function mockSpawn(responses: string[]) {
-  let i = 0;
+function mockSpawn(jsonResponseStr: string) {
+  let readDone = false;
   const read = mock(() => {
-    if (i < responses.length) {
-      return Promise.resolve({ value: encoder.encode(responses[i++]), done: false });
+    if (!readDone) {
+      readDone = true;
+      return Promise.resolve({ value: encoder.encode(jsonResponseStr), done: false });
     }
     return Promise.resolve({ done: true });
   });
   const proc = {
-    stdin: { write: mock(() => {}), flush: mock(() => {}) },
+    stdin: { write: mock(() => {}), end: mock(() => {}) },
     stdout: { getReader: () => ({ read }) },
     kill: mock(() => {}),
   };
@@ -294,9 +276,12 @@ describe("image_search", () => {
 
   it("filters by filename — case insensitive", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "Cat.PNG"));
-    mockSpawn([mcpInit, mcpResult("cat result")]);
-    const result = await imageSearchTool.execute({ filename: "cat" }, SESSION);
-    expect(result).toBe("cat result");
+    mockSpawn(jsonResponse("Yandex", [{ index: 1, title: "cat result", url: "https://ex.com", thumbnail: "https://ex.com/thumb.jpg" }]));
+    globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
+    mockFetchOk();
+    // biome-ignore lint/suspicious/noExplicitAny: structured result
+    const result = (await imageSearchTool.execute({ filename: "cat" }, SESSION)) as any;
+    expect(result.output).toContain("cat result");
   });
 
   it("reports index out of range", async () => {
@@ -321,36 +306,28 @@ describe("image_search", () => {
 
   it("performs successful search with default engine", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    const proc = mockSpawn([mcpInit, mcpResult("found it")]);
-    const result = await imageSearchTool.execute({}, SESSION);
-    expect(result).toBe("found it");
+    const proc = mockSpawn(jsonResponse("Yandex", [{ index: 1, title: "found it", url: "https://ex.com", thumbnail: "https://ex.com/thumb.jpg" }]));
+    globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
+    mockFetchOk();
+    // biome-ignore lint/suspicious/noExplicitAny: structured result
+    const result = (await imageSearchTool.execute({}, SESSION)) as any;
+    expect(result.output).toContain("found it");
     expect(Bun.spawn).toHaveBeenCalledWith(
-      ["uvx", "image-search-mcp"],
+      ["uv", "run", expect.stringMatching(/search\.py$/)],
       expect.objectContaining({ stdin: "pipe", stdout: "pipe" }),
     );
     // biome-ignore lint/suspicious/noExplicitAny: mock internals
     const calls = (proc.stdin.write as any).mock.calls.map((c: string[]) => c[0]);
-    expect(calls.some((s: string) => s.includes("tools/call"))).toBeTrue();
-    expect(calls.find((s: string) => s.includes("tools/call"))).toContain("Yandex");
-  });
-
-  it("defaults limit to 10 when omitted", async () => {
-    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    const proc = mockSpawn([mcpInit, mcpResult("ok")]);
-    await imageSearchTool.execute({}, SESSION);
-    // biome-ignore lint/suspicious/noExplicitAny: mock internals
-    const calls = (proc.stdin.write as any).mock.calls.map((c: string[]) => c[0]);
-    const call = calls.find((s: string) => s.includes("tools/call"));
-    expect(call).toContain('"limit":10');
+    expect(calls.some((s: string) => s.includes("Yandex"))).toBeTrue();
   });
 
   it("passes custom engine and limit", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    const proc = mockSpawn([mcpInit, mcpResult("sauce")]);
+    const proc = mockSpawn(jsonResponse("SauceNAO", []));
     await imageSearchTool.execute({ engine: "SauceNAO", limit: 5 }, SESSION);
     // biome-ignore lint/suspicious/noExplicitAny: mock internals
     const calls = (proc.stdin.write as any).mock.calls.map((c: string[]) => c[0]);
-    const call = calls.find((s: string) => s.includes("tools/call"));
+    const call = calls.find((s: string) => s.includes("SauceNAO"));
     expect(call).toContain("SauceNAO");
     expect(call).toContain('"limit":5');
   });
@@ -360,36 +337,42 @@ describe("image_search", () => {
       imageRecord("data:image/png;base64,first", "first.png"),
       imageRecord("data:image/png;base64,second", "second.png"),
     );
-    const proc = mockSpawn([mcpInit, mcpResult("second")]);
+    const proc = mockSpawn(jsonResponse("Yandex", [{ index: 1, title: "second", url: "https://ex.com", thumbnail: "" }]));
     await imageSearchTool.execute({ index: 2 }, SESSION);
     // biome-ignore lint/suspicious/noExplicitAny: mock internals
     const calls = (proc.stdin.write as any).mock.calls.map((c: string[]) => c[0]);
-    expect(calls.find((s: string) => s.includes("tools/call"))).toContain("second");
+    expect(calls.find((s: string) => s.includes("second"))).toContain("second");
   });
 
   it("kills child process in finally block", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    const proc = mockSpawn([mcpInit, mcpResult("ok")]);
+    const proc = mockSpawn(jsonResponse("Yandex", [{ index: 1, title: "ok", url: "https://ex.com", thumbnail: "" }]));
     await imageSearchTool.execute({}, SESSION);
     expect(proc.kill).toHaveBeenCalled();
   });
 
-  it("returns plain string when MCP response has no Thumbnail lines", async () => {
+  it("returns plain text when search has no results", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([mcpInit, mcpResult("no images found")]);
+    mockSpawn(JSON.stringify({ engine: "Yandex", count: 0, results: [] }));
     const result = await imageSearchTool.execute({}, SESSION);
-    expect(result).toBe("no images found");
+    expect(result).toContain("Yandex");
+    expect(result).toContain("No results found");
+  });
+
+  it("returns error message from search script", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+    mockSpawn(JSON.stringify({ error: "network error" }));
+    const result = await imageSearchTool.execute({}, SESSION);
+    expect(result).toContain("Search failed");
+    expect(result).toContain("network error");
   });
 
   it("returns structured result with image attachments for thumbnail results", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "Result A", thumbnail: "https://example.com/a.jpg" },
-        { title: "Result B", thumbnail: "https://example.com/b.jpg" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "Result A", url: "https://example.com/a", thumbnail: "https://example.com/a.jpg" },
+      { index: 2, title: "Result B", url: "https://example.com/b", thumbnail: "https://example.com/b.jpg" },
+    ]));
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
@@ -412,14 +395,11 @@ describe("image_search", () => {
 
   it("caps attachments to the requested limit", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "R1", thumbnail: "https://example.com/1.jpg" },
-        { title: "R2", thumbnail: "https://example.com/2.jpg" },
-        { title: "R3", thumbnail: "https://example.com/3.jpg" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "R1", url: "https://ex.com/1", thumbnail: "https://example.com/1.jpg" },
+      { index: 2, title: "R2", url: "https://ex.com/2", thumbnail: "https://example.com/2.jpg" },
+      { index: 3, title: "R3", url: "https://ex.com/3", thumbnail: "https://example.com/3.jpg" },
+    ]));
     mockFetchOk();
     globalThis.__hashMockState.presets = [{ hash: 111n, width: 100, height: 100 }];
 
@@ -434,13 +414,10 @@ describe("image_search", () => {
 
   it("skips thumbnails that fail to download", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "Good", thumbnail: "https://example.com/good.jpg" },
-        { title: "Bad", thumbnail: "https://example.com/bad.jpg" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "Good", url: "https://ex.com/1", thumbnail: "https://example.com/good.jpg" },
+      { index: 2, title: "Bad", url: "https://ex.com/2", thumbnail: "https://example.com/bad.jpg" },
+    ]));
     let callCount = 0;
     globalThis.fetch = mock(() => {
       callCount++;
@@ -461,13 +438,10 @@ describe("image_search", () => {
 
   it("deduplicates identical thumbnails into one attachment", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "A", thumbnail: "https://example.com/a.jpg" },
-        { title: "B", thumbnail: "https://example.com/b.jpg" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
+      { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
+    ]));
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 123n, width: 100, height: 100 },
@@ -482,13 +456,10 @@ describe("image_search", () => {
 
   it("keeps separate attachments for different thumbnails", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "A", thumbnail: "https://example.com/a.jpg" },
-        { title: "B", thumbnail: "https://example.com/b.jpg" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
+      { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
+    ]));
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
@@ -504,14 +475,11 @@ describe("image_search", () => {
 
   it("groups non-consecutive duplicates correctly", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "A", thumbnail: "https://example.com/a.jpg" },
-        { title: "B", thumbnail: "https://example.com/b.jpg" },
-        { title: "C", thumbnail: "https://example.com/c.jpg" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
+      { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
+      { index: 3, title: "C", url: "https://ex.com/c", thumbnail: "https://example.com/c.jpg" },
+    ]));
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
@@ -528,13 +496,10 @@ describe("image_search", () => {
 
   it("picks highest resolution thumbnail from each duplicate group", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "Small", thumbnail: "https://example.com/small.jpg" },
-        { title: "Large", thumbnail: "https://example.com/large.jpg" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "Small", url: "https://ex.com/small", thumbnail: "https://example.com/small.jpg" },
+      { index: 2, title: "Large", url: "https://ex.com/large", thumbnail: "https://example.com/large.jpg" },
+    ]));
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 456n, width: 50, height: 50 },
@@ -554,14 +519,11 @@ describe("image_search", () => {
 
   it("groups transitively: A↔B and B↔C but not A↔C are still merged via B", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "A", thumbnail: "https://example.com/a.jpg" },
-        { title: "B", thumbnail: "https://example.com/b.jpg" },
-        { title: "C", thumbnail: "https://example.com/c.jpg" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
+      { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
+      { index: 3, title: "C", url: "https://ex.com/c", thumbnail: "https://example.com/c.jpg" },
+    ]));
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 50, height: 50 },
@@ -577,13 +539,10 @@ describe("image_search", () => {
 
   it("populates search cache with page URLs from results", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "R1", pageUrl: "https://example.com/page/1", thumbnail: "https://example.com/1.jpg" },
-        { title: "R2", pageUrl: "https://example.com/page/2", thumbnail: "https://example.com/2.jpg" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "R1", url: "https://example.com/page/1", thumbnail: "https://example.com/1.jpg" },
+      { index: 2, title: "R2", url: "https://example.com/page/2", thumbnail: "https://example.com/2.jpg" },
+    ]));
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
@@ -597,20 +556,17 @@ describe("image_search", () => {
     expect(cached!.results).toHaveLength(2);
     expect(cached!.results[0].pageUrl).toBe("https://example.com/page/1");
     expect(cached!.results[1].pageUrl).toBe("https://example.com/page/2");
-  })
+  });
 
   it("formats a run of 5 consecutive duplicates as a range", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "A", thumbnail: "https://example.com/a.jpg" },
-        { title: "B", thumbnail: "https://example.com/b.jpg" },
-        { title: "C", thumbnail: "https://example.com/c.jpg" },
-        { title: "D", thumbnail: "https://example.com/d.jpg" },
-        { title: "E", thumbnail: "https://example.com/e.jpg" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
+      { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
+      { index: 3, title: "C", url: "https://ex.com/c", thumbnail: "https://example.com/c.jpg" },
+      { index: 4, title: "D", url: "https://ex.com/d", thumbnail: "https://example.com/d.jpg" },
+      { index: 5, title: "E", url: "https://ex.com/e", thumbnail: "https://example.com/e.jpg" },
+    ]));
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 999n, width: 100, height: 100 },
@@ -626,8 +582,6 @@ describe("image_search", () => {
     expect(result.attachments[0].filename).toBe("result_1-5.png");
   });
 });
-
-
 
 describe("stripTrackingParams", () => {
   it("removes utm_* parameters", () => {
@@ -690,13 +644,10 @@ describe("blocklist", () => {
 
   it("keeps all results when blocklist has no matches", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "A", thumbnail: "https://ex.com/a.jpg", pageUrl: "https://ex.com/1" },
-        { title: "B", thumbnail: "https://ex.com/b.jpg", pageUrl: "https://ex.com/2" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "A", url: "https://ex.com/1", thumbnail: "https://ex.com/a.jpg" },
+      { index: 2, title: "B", url: "https://ex.com/2", thumbnail: "https://ex.com/b.jpg" },
+    ]));
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
@@ -710,13 +661,10 @@ describe("blocklist", () => {
 
   it("removes results from blocklisted domains", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "Keep", thumbnail: "https://good.com/a.jpg", pageUrl: "https://good.com/1" },
-        { title: "Block", thumbnail: "https://bad.com/b.jpg", pageUrl: "https://bad.com/2" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "Keep", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
+      { index: 2, title: "Block", url: "https://bad.com/2", thumbnail: "https://bad.com/b.jpg" },
+    ]));
     mockFetchOk();
     globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
 
@@ -729,12 +677,9 @@ describe("blocklist", () => {
 
   it("returns message when all results are blocked", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "A", thumbnail: "https://bad.com/a.jpg", pageUrl: "https://bad.com/1" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "A", url: "https://bad.com/1", thumbnail: "https://bad.com/a.jpg" },
+    ]));
     mockFetchOk();
 
     const result = await imageSearchTool.execute({ blocklist: ["bad.com"] }, SESSION);
@@ -743,13 +688,10 @@ describe("blocklist", () => {
 
   it("blocks subdomains of blocklisted domains", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn([
-      mcpInit,
-      mcpResultWithThumbnails("Yandex", [
-        { title: "A", thumbnail: "https://sub.bad.com/a.jpg", pageUrl: "https://sub.bad.com/1" },
-        { title: "B", thumbnail: "https://good.com/b.jpg", pageUrl: "https://good.com/2" },
-      ]),
-    ]);
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "A", url: "https://sub.bad.com/1", thumbnail: "https://sub.bad.com/a.jpg" },
+      { index: 2, title: "B", url: "https://good.com/2", thumbnail: "https://good.com/b.jpg" },
+    ]));
     mockFetchOk();
     globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
 

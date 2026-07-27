@@ -7,7 +7,35 @@ import path from "node:path";
 import { perceptualHash, hammingDistance, PHASH_THRESHOLD } from "./hash";
 import { dctSignature, cosineDistance } from "./sig";
 
-// ── Search result cache (module-level) ────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────
+
+interface SearchResult {
+  index: number;
+  title?: string;
+  url?: string;
+  thumbnail?: string;
+  source?: string;
+  size?: string;
+  width?: number;
+  height?: number;
+  similarity?: number;
+}
+
+interface SearchResponse {
+  engine: string;
+  count: number;
+  results: SearchResult[];
+  error?: string;
+  url?: string;
+}
+
+interface FilePart {
+  type: string;
+  mime: string;
+  url: string;
+  filename?: string;
+}
+
 interface CachedResult {
   title: string;
   pageUrl: string;
@@ -21,7 +49,7 @@ interface CachedSearch {
   sourceImageUrl: string;
   engine: string;
   results: CachedResult[];
-  rawText: string;
+  rawResponse: string;
 }
 
 const searchCache = new Map<string, CachedSearch>();
@@ -64,85 +92,6 @@ function saveSearchCacheToDisk(): void {
 
 loadSearchCacheFromDisk();
 
-function extractResultSections(text: string): Map<number, { title: string; pageUrl: string; thumbnailUrl: string; width: number | null; height: number | null }> {
-  const map = new Map<number, { title: string; pageUrl: string; thumbnailUrl: string; width: number | null; height: number | null }>();
-  const sections = text.split(/^--- Result (\d+) ---$/m);
-  for (let i = 1; i < sections.length - 1; i += 2) {
-    const idx = parseInt(sections[i], 10);
-    const body = sections[i + 1];
-    const titleMatch = body.match(/^Title:\s*(.+)$/m);
-    const urlMatch = body.match(/^URL:\s*(.+)$/m);
-    const thumbMatch = body.match(/^Thumbnail:\s*(.+)$/m);
-    let width: number | null = null;
-    let height: number | null = null;
-    const sizeMatch = body.match(/^Size:\s*(\d+)x(\d+)$/m);
-    if (sizeMatch) {
-      width = parseInt(sizeMatch[1], 10);
-      height = parseInt(sizeMatch[2], 10);
-    }
-    map.set(idx, {
-      title: titleMatch?.[1] ?? "",
-      pageUrl: urlMatch?.[1] ?? "",
-      thumbnailUrl: thumbMatch?.[1] ?? "",
-      width,
-      height,
-    });
-  }
-  return map;
-}
-
-interface FilePart {
-  type: string;
-  mime: string;
-  url: string;
-  filename?: string;
-}
-
-interface McpResponse {
-  content?: { type: string; text: string }[];
-}
-
-function writeMsg(stdin: { write(data: string): number; flush(): void }, msg: object) {
-  stdin.write(`${JSON.stringify(msg)}\n`);
-  stdin.flush();
-}
-
-async function readResponse(
-  reader: ReadableStreamDefaultReader,
-  id: number,
-  timeoutMs = 30_000,
-): Promise<unknown> {
-  const decoder = new TextDecoder();
-  let buf = "";
-
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() < deadline) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-
-    const lines = buf.split("\n");
-    buf = lines.pop() ?? "";
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const resp = JSON.parse(trimmed);
-        if (resp.id === id) {
-          if (resp.error) throw new Error(resp.error.message);
-          return resp.result;
-        }
-      } catch (e) {
-        if (e instanceof SyntaxError) continue;
-        throw e;
-      }
-    }
-  }
-  throw new Error("MCP response timeout or connection closed");
-}
-
 function getDbDir(
   platform = process.platform,
   appData = process.env.APPDATA,
@@ -151,74 +100,6 @@ function getDbDir(
   return platform === "win32"
     ? path.join(appData ?? "C:\\Users\\Default\\AppData\\Roaming", "opencode")
     : path.join(homeDir, ".local/share/opencode");
-}
-
-const THUMBNAIL_RE = /^Thumbnail: (.+)$/gm;
-
-function extractThumbnails(text: string): string[] {
-  const urls: string[] = [];
-  for (const match of text.matchAll(THUMBNAIL_RE)) {
-    urls.push(match[1]);
-  }
-  return urls;
-}
-
-function isDuplicateContent(titleLine: string, contentLine: string): boolean {
-  const a = titleLine.replace(/^Title:\s*/i, "").toLowerCase().trim();
-  const b = contentLine.replace(/^Content:\s*/i, "").toLowerCase().trim();
-  if (a === b) return true;
-  if (a.includes(b) || b.includes(a)) return true;
-
-  const tokenize = (s: string) =>
-    new Set(s.split(/[^a-z0-9]+/).filter(Boolean));
-  const ta = tokenize(a);
-  const tb = tokenize(b);
-  let intersection = 0;
-  for (const t of ta) if (tb.has(t)) intersection++;
-  const union = ta.size + tb.size - intersection;
-  return union > 0 && intersection / union >= 0.7;
-}
-
-function reformatResults(text: string): string {
-  const FIELD_ORDER = ["Title", "Content", "URL", "Source", "Size", "Visual Difference"];
-
-  const parts = text.split(/^--- Result (\d+) ---$/m);
-  if (parts.length < 3) return text.trim();
-
-  const header = parts[0].trim();
-
-  const rebuilt: string[] = [];
-  for (let i = 1; i < parts.length - 1; i += 2) {
-    const idx = parseInt(parts[i], 10);
-    const body = parts[i + 1];
-    const lines = body.split("\n");
-
-    const fields: Record<string, string> = {};
-    for (const line of lines) {
-      const m = line.match(/^(Title|URL|Source|Content|Size|Visual Difference|Thumbnail):/);
-      if (m) fields[m[1]] = line;
-    }
-
-    const sectionLines = FIELD_ORDER.filter(
-      (k) => fields[k] && !(k === "Content" && fields["Title"] && isDuplicateContent(fields["Title"], fields[k])),
-    ).map((k) => fields[k]!);
-    rebuilt.push(`--- Result ${idx} ---\n${sectionLines.join("\n")}`);
-  }
-
-  return (header ? header + "\n\n" : "") + rebuilt.join("\n\n");
-}
-
-function cleanUrlsInText(text: string, sections: Map<number, { pageUrl: string }>): string {
-  let result = text;
-  for (const [, s] of sections) {
-    if (s.pageUrl) {
-      const cleanUrl = stripTrackingParams(s.pageUrl);
-      if (cleanUrl !== s.pageUrl) {
-        result = result.replaceAll(`URL: ${s.pageUrl}`, `URL: ${cleanUrl}`);
-      }
-    }
-  }
-  return result;
 }
 
 async function fetchImageAsBuffer(
@@ -231,8 +112,6 @@ async function fetchImageAsBuffer(
   const buffer = new Uint8Array(await blob.arrayBuffer());
   return { buffer, mime };
 }
-
-
 
 function stripTrackingParams(url: string): string {
   try {
@@ -335,7 +214,7 @@ function getBlocklist(blocklist?: string[]): Set<string> {
   return domains;
 }
 
-function matchesBlocklist(url: string, blocklist: Set<string>): boolean {
+function isBlocked(url: string, blocklist: Set<string>): boolean {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
     for (const domain of blocklist) {
@@ -345,45 +224,43 @@ function matchesBlocklist(url: string, blocklist: Set<string>): boolean {
   return false;
 }
 
-function filterBlockedResults(text: string, blocklist: Set<string>): string {
-  if (blocklist.size === 0) return text;
+function filterBlockedResults(results: SearchResult[], blocklist: Set<string>): SearchResult[] {
+  if (blocklist.size === 0) return results;
+  const filtered = results.filter((r) => {
+    const url = r.url ?? r.thumbnail ?? "";
+    return !url || !isBlocked(url, blocklist);
+  });
+  return filtered.map((r, i) => ({ ...r, index: i + 1 }));
+}
 
-  const parts = text.split(/^--- Result (\d+) ---$/m);
-  const header = parts[0];
-  const kept: string[] = [];
-  let newIdx = 1;
+function formatResultsText(engine: string, results: SearchResult[], distances: Map<number, number>): string {
+  if (results.length === 0) return `Search Engine: ${engine}\nNo results found`;
 
-  for (let i = 1; i < parts.length - 1; i += 2) {
-    const body = parts[i + 1];
-    const url = body.match(/^URL:\s*(.+)$/m)?.[1] ?? "";
-    if (!url || !matchesBlocklist(url, blocklist)) {
-      kept.push(`--- Result ${newIdx} ---`, body);
-      newIdx++;
-    }
+  const lines: string[] = [
+    `Search Engine: ${engine}`,
+    `Found ${results.length} results (showing top ${results.length}):`,
+  ];
+
+  for (const r of results) {
+    lines.push("", `--- Result ${r.index} ---`);
+    if (r.title) lines.push(`Title: ${r.title}`);
+    if (r.url) lines.push(`URL: ${stripTrackingParams(r.url)}`);
+    if (r.source) lines.push(`Source: ${r.source}`);
+    if (r.similarity !== undefined) lines.push(`Similarity: ${r.similarity.toFixed(1)}%`);
+    if (r.size) lines.push(`Size: ${r.size}`);
+    if (r.thumbnail) lines.push(`Thumbnail: ${r.thumbnail}`);
+    const dist = distances.get(r.index);
+    if (dist !== undefined) lines.push(`Visual Difference: ${dist.toFixed(3)}`);
   }
 
-  if (kept.length === 0) return "All results were filtered by domain blocklist";
-
-  const count = newIdx - 1;
-  let h = header.replace(
-    /^(Found )\d+( results.*?top )\d+/m,
-    `$1${count}$2${count}`,
-  );
-  if (h === header && count > 0) {
-    const nMatch = header.match(/(\d+)\s*results?/i);
-    if (nMatch) {
-      h = header.replace(/\d+\s*results?/i, `${count} results`);
-    }
-  }
-
-  return h.trimEnd() + "\n\n" + kept.join("\n");
+  return lines.join("\n");
 }
 
 const imageSearchTool = tool({
   description:
     "Retrieve an image from the session and perform a reverse image search. " +
     "Omit all args to use the most recent image. " +
-    "Supports multiple search engines via image-search-mcp (default: Yandex). " +
+    "Supports multiple search engines via PicImageSearch (default: Yandex). " +
     "Text-only models: use this tool when asked about an image you cannot view.",
   args: {
     index: tool.schema
@@ -458,157 +335,139 @@ const imageSearchTool = tool({
 
     const origFetch = fetchImageAsBuffer(source).catch(() => null);
 
-    const proc = Bun.spawn(["uvx", "image-search-mcp"], {
+    const searchPyPath = path.join(import.meta.dir, "search.py");
+    const proc = Bun.spawn(["uv", "run", searchPyPath], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "inherit",
     });
 
+    let response: SearchResponse;
     try {
+      const input = JSON.stringify({
+        source,
+        engine: args.engine ?? "Yandex",
+        limit: args.limit ?? 10,
+      });
+      proc.stdin.write(input);
+      proc.stdin.end();
+
       const reader = proc.stdout.getReader();
-
-      writeMsg(proc.stdin, {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: "2024-11-05",
-          capabilities: {},
-          clientInfo: { name: "opencode-image-search", version: "1.0" },
-        },
-      });
-      await readResponse(reader, 1);
-
-      writeMsg(proc.stdin, {
-        jsonrpc: "2.0",
-        method: "notifications/initialized",
-      });
-
-      writeMsg(proc.stdin, {
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/call",
-        params: {
-          name: "search_image",
-          arguments: {
-            source,
-            engine: args.engine ?? "Yandex",
-            limit: args.limit ?? 10,
-          },
-        },
-      });
-      const result = (await readResponse(reader, 2)) as McpResponse;
-
-      const text = result?.content?.[0]?.text ?? JSON.stringify(result);
-      const blocklist = getBlocklist(args.blocklist);
-      const filteredText = filterBlockedResults(text, blocklist);
-
-      const sections = extractResultSections(filteredText);
-      const cachedResults: CachedResult[] = [];
-      const sectionKeys = Array.from(sections.keys()).sort((a, b) => a - b);
-      for (const k of sectionKeys) {
-        const s = sections.get(k)!;
-        cachedResults.push({
-          title: s.title,
-          pageUrl: stripTrackingParams(s.pageUrl),
-          thumbnailUrl: s.thumbnailUrl,
-          width: s.width,
-          height: s.height,
-        });
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) buf += decoder.decode(value, { stream: true });
       }
-      if (cachedResults.length > 0) {
-        const searchId = (searchIdCounters.get(context.sessionID) ?? 0) + 1;
-        searchIdCounters.set(context.sessionID, searchId);
-        searchCache.set(`${context.sessionID}::search::${searchId}`, {
-          searchId,
-          sourceImageUrl: source,
-          engine: args.engine ?? "Yandex",
-          results: cachedResults,
-          rawText: text,
-        });
-        saveSearchCacheToDisk();
-      }
-
-      const limit = args.limit ?? 10;
-      const thumbnailUrls = extractThumbnails(filteredText).slice(0, limit);
-      if (thumbnailUrls.length === 0) return reformatResults(cleanUrlsInText(filteredText, sections));
-
-      const origResult = await origFetch;
-      const origSig = origResult ? await dctSignature(origResult.buffer) : null;
-
-      const distances = new Map<number, number>();
-      const downloads: { resultIndex: number; buffer: Uint8Array; mime: string }[] = [];
-      for (let i = 0; i < thumbnailUrls.length; i++) {
-        try {
-          const { buffer, mime } = await fetchImageAsBuffer(thumbnailUrls[i], context.abort);
-          downloads.push({ resultIndex: i + 1, buffer, mime });
-          if (origSig) {
-            const thumbSig = await dctSignature(buffer);
-            if (thumbSig) {
-              distances.set(i + 1, cosineDistance(origSig.sig, thumbSig.sig));
-            }
-          }
-        } catch {
-          // skip thumbnails that fail to download
-        }
-      }
-
-      if (downloads.length === 0) return reformatResults(cleanUrlsInText(filteredText, sections));
-
-      let textWithDist = filteredText;
-      if (distances.size > 0) {
-        const sorted = Array.from(distances.entries()).sort((a, b) => a[0] - b[0]);
-        for (const [idx, dist] of sorted.toReversed()) {
-          const nextPattern = `\n--- Result ${idx + 1} ---`;
-          const nextPos = textWithDist.indexOf(nextPattern);
-          if (nextPos !== -1) {
-            let walk = nextPos;
-            while (walk > 0 && (textWithDist[walk - 1] === '\n' || textWithDist[walk - 1] === '\r')) {
-              walk--;
-            }
-            textWithDist = textWithDist.slice(0, walk) + `\nVisual Difference: ${dist.toFixed(3)}` + textWithDist.slice(walk);
-          } else {
-            textWithDist = textWithDist.trimEnd() + `\nVisual Difference: ${dist.toFixed(3)}`;
-          }
-        }
-      }
-      const displayText = reformatResults(cleanUrlsInText(textWithDist, sections));
-
-      const results: ThumbnailResult[] = [];
-      for (const dl of downloads) {
-        const ph = await perceptualHash(dl.buffer);
-        if (ph) {
-          results.push({
-            resultIndex: dl.resultIndex,
-            buffer: dl.buffer,
-            mime: dl.mime,
-            hash: ph.hash,
-            pixels: ph.width * ph.height,
-          });
-        }
-      }
-
-      if (results.length === 0) return displayText;
-
-      const groups = deduplicate(results);
-
-      const attachments: ToolAttachment[] = [];
-      for (const group of groups) {
-        const { winner, indices } = group;
-        const ext = winner.mime.split("/")[1] || "jpg";
-        const base64 = Buffer.from(winner.buffer).toString("base64");
-        attachments.push({
-          type: "file",
-          mime: winner.mime,
-          url: `data:${winner.mime};base64,${base64}`,
-          filename: `result_${formatIndices(indices)}.${ext}`,
-        });
-      }
-
-      return { output: displayText, attachments };
+      response = JSON.parse(buf) as SearchResponse;
     } finally {
       proc.kill();
     }
+
+    if (response.error) {
+      return `Search failed (${response.engine}): ${response.error}`;
+    }
+
+    const blocklist = getBlocklist(args.blocklist);
+    const results = filterBlockedResults(response.results, blocklist);
+
+    const cachedResults: CachedResult[] = results.map((r) => ({
+      title: r.title ?? "",
+      pageUrl: stripTrackingParams(r.url ?? ""),
+      thumbnailUrl: r.thumbnail ?? "",
+      width: r.width ?? null,
+      height: r.height ?? null,
+    }));
+
+    if (cachedResults.length > 0) {
+      const searchId = (searchIdCounters.get(context.sessionID) ?? 0) + 1;
+      searchIdCounters.set(context.sessionID, searchId);
+      searchCache.set(`${context.sessionID}::search::${searchId}`, {
+        searchId,
+        sourceImageUrl: source,
+        engine: response.engine,
+        results: cachedResults,
+        rawResponse: JSON.stringify(response),
+      });
+      saveSearchCacheToDisk();
+    }
+
+    if (results.length === 0) {
+      const hadResults = response.results.length > 0;
+      return hadResults
+        ? "All results were filtered by domain blocklist"
+        : `Search Engine: ${response.engine}\nNo results found`;
+    }
+
+    const limit = args.limit ?? 10;
+    const thumbnailUrls = results.map((r) => r.thumbnail ?? "").filter(Boolean).slice(0, limit);
+
+    if (thumbnailUrls.length === 0) {
+      return formatResultsText(response.engine, results, new Map());
+    }
+
+    const origResult = await origFetch;
+    const origSig = origResult ? await dctSignature(origResult.buffer) : null;
+
+    const distances = new Map<number, number>();
+    const downloads: { resultIndex: number; buffer: Uint8Array; mime: string }[] = [];
+    let downloadCount = 0;
+    for (const r of results) {
+      if (!r.thumbnail || downloadCount >= limit) continue;
+      downloadCount++;
+      try {
+        const { buffer, mime } = await fetchImageAsBuffer(r.thumbnail, context.abort);
+        downloads.push({ resultIndex: r.index, buffer, mime });
+        if (origSig) {
+          const thumbSig = await dctSignature(buffer);
+          if (thumbSig) {
+            distances.set(r.index, cosineDistance(origSig.sig, thumbSig.sig));
+          }
+        }
+      } catch {
+        // skip thumbnails that fail to download
+      }
+    }
+
+    if (downloads.length === 0) {
+      return formatResultsText(response.engine, results, distances);
+    }
+
+    const displayText = formatResultsText(response.engine, results, distances);
+
+    const thumbnailResults: ThumbnailResult[] = [];
+    for (const dl of downloads) {
+      const ph = await perceptualHash(dl.buffer);
+      if (ph) {
+        thumbnailResults.push({
+          resultIndex: dl.resultIndex,
+          buffer: dl.buffer,
+          mime: dl.mime,
+          hash: ph.hash,
+          pixels: ph.width * ph.height,
+        });
+      }
+    }
+
+    if (thumbnailResults.length === 0) return displayText;
+
+    const groups = deduplicate(thumbnailResults);
+
+    const attachments: ToolAttachment[] = [];
+    for (const group of groups) {
+      const { winner, indices } = group;
+      const ext = winner.mime.split("/")[1] || "jpg";
+      const base64 = Buffer.from(winner.buffer).toString("base64");
+      attachments.push({
+        type: "file",
+        mime: winner.mime,
+        url: `data:${winner.mime};base64,${base64}`,
+        filename: `result_${formatIndices(indices)}.${ext}`,
+      });
+    }
+
+    return { output: displayText, attachments };
   },
 });
 

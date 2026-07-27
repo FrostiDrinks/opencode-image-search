@@ -33,7 +33,7 @@ These are inherited from OpenCode each time the tool is invoked. Set them via Op
 | `IMAGE_SEARCH_API_KEY` | SauceNAO | API key |
 | `IMAGE_SEARCH_COOKIES` | Google, Bing, Yandex, Tineye, EHentai, GoogleLens | Browser cookies to bypass bot protection |
 | `IMAGE_SEARCH_PROXY` | All engines | Proxy URL (e.g. `http://127.0.0.1:7890`). Falls back to `HTTP_PROXY` / `HTTPS_PROXY`. |
-| `IMAGE_SEARCH_BLOCKLIST` | `image_search` | Comma-separated domains to exclude from results (e.g. `pinterest.com,instagram.com`) |
+| `IMAGE_SEARCH_BLOCKLIST` | `image_search` | Comma-separated domains to exclude from results (e.g. `x.com,y.com`) |
 
 ## Code conventions
 

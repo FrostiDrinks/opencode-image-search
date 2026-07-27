@@ -376,7 +376,7 @@ const imageSearchTool = tool({
     blocklist: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Domains to exclude from results (e.g. pinterest.com). Also read from IMAGE_SEARCH_BLOCKLIST env var (comma-separated)."),
+      .describe("Domains to exclude from results (e.g. x.com). Also read from IMAGE_SEARCH_BLOCKLIST env var (comma-separated)."),
   },
   async execute(args, context) {
     const db = new Database(path.join(getDbDir(), "opencode.db"), { readonly: true });

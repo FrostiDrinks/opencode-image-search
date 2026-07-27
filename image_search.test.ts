@@ -6,6 +6,10 @@ declare global {
     presets: { hash: bigint; width: number; height: number }[];
     index: number;
   };
+  var __hashMockState: {
+    presets: { hash: bigint; width: number; height: number }[];
+    index: number;
+  };
 }
 
 // --- Mock schema chain helpers ---
@@ -32,6 +36,7 @@ mock.module("@opencode-ai/plugin", () => {
     schema: {
       number: () => ({ int }),
       string: () => ({ optional: opt }),
+      array: () => ({ optional: opt }),
     },
   });
   return { default: tool, tool };
@@ -55,20 +60,25 @@ globalThis.__crossImageDecodeState = {
 };
 
 function makePixelData(hash: bigint): Uint8Array {
-  const pixelCount = 9 * 8;
+  const W = 32;
+  const H = 32;
+  const pixelCount = W * H;
   const data = new Uint8Array(pixelCount * 4);
-  for (let y = 0; y < 8; y++) {
-    let value = 150;
-    for (let x = 0; x < 9; x++) {
-      const idx = (y * 9 + x) * 4;
-      if (x > 0) {
-        const bit = (hash >> BigInt(y * 8 + (x - 1))) & 1n;
-        value += bit === 1n ? -10 : 10;
-      }
-      const clamped = Math.max(0, Math.min(255, value));
-      data[idx] = clamped;
-      data[idx + 1] = clamped;
-      data[idx + 2] = clamped;
+  const seed = Number(hash & 0xFFn);
+  const pattern = (seed >> 2) & 3;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const idx = (y * W + x) * 4;
+      const base = x * 3 + y * 7;
+      const mod =
+        pattern === 0 ? x * 11 :
+        pattern === 1 ? y * 13 :
+        pattern === 2 ? x * y :
+        x * 11 + y * 13;
+      const value = (seed + base + mod) % 256;
+      data[idx] = value;
+      data[idx + 1] = value;
+      data[idx + 2] = value;
       data[idx + 3] = 255;
     }
   }
@@ -85,7 +95,7 @@ mock.module("cross-image", () => ({
         height: preset.height,
         data: makePixelData(preset.hash),
         resize: mock(function (
-          this: { width: number; height: number; data: Uint8Array },
+          this: { width: number; height: number },
           opts: { width: number; height: number },
         ) {
           this.width = opts.width;
@@ -97,7 +107,40 @@ mock.module("cross-image", () => ({
   },
 }));
 
-import { getDbDir, imageSearchTool } from "./src/index";
+globalThis.__hashMockState = {
+  presets: [] as { hash: bigint; width: number; height: number }[],
+  index: 0,
+};
+
+mock.module("./src/hash", () => ({
+  perceptualHash: mock(async (_data: Uint8Array) => {
+    const state = globalThis.__hashMockState;
+    const preset = state.presets[state.index++] ?? { hash: 0n, width: 100, height: 100 };
+    return { hash: preset.hash, width: preset.width, height: preset.height };
+  }),
+  hammingDistance: (a: bigint, b: bigint) => {
+    let xor = a ^ b;
+    let count = 0;
+    while (xor > 0n) {
+      count += Number(xor & 1n);
+      xor >>= 1n;
+    }
+    return count;
+  },
+  PHASH_THRESHOLD: 10,
+}));
+
+mock.module("node:fs", () => {
+  const m: Record<string, unknown> = {};
+  const noop = () => {};
+  m.readFileSync = () => { throw new Error(); };
+  m.writeFileSync = noop;
+  m.mkdirSync = noop;
+  m.default = m;
+  return m;
+});
+
+import { getDbDir, stripTrackingParams, imageSearchTool, searchCache, searchIdCounters, loadSearchCacheFromDisk, saveSearchCacheToDisk } from "./src/index";
 
 // --- Helpers ---
 const encoder = new TextEncoder();
@@ -142,13 +185,19 @@ function mockFetchOk() {
   ) as unknown as typeof globalThis.fetch;
 }
 
-function mcpResultWithThumbnails(engine: string, results: { title: string; thumbnail: string }[]) {
+function mcpResultWithThumbnails(
+  engine: string,
+  results: { title: string; thumbnail: string; pageUrl?: string }[],
+) {
   const lines = [
     `Search Engine: ${engine}`,
     `Found ${results.length} results (showing top ${results.length}):`,
   ];
   results.forEach((r, i) => {
-    lines.push("", `--- Result ${i + 1} ---`, `Title: ${r.title}`, `Thumbnail: ${r.thumbnail}`);
+    const resultLines = ["", `--- Result ${i + 1} ---`, `Title: ${r.title}`];
+    if (r.pageUrl) resultLines.push(`URL: ${r.pageUrl}`);
+    resultLines.push(`Thumbnail: ${r.thumbnail}`);
+    lines.push(...resultLines);
   });
   return mcpResult(lines.join("\n"));
 }
@@ -160,6 +209,7 @@ afterEach(() => {
   Bun.spawn = originalSpawn;
   globalThis.fetch = originalFetch;
   globalThis.__crossImageDecodeState.index = 0;
+  globalThis.__hashMockState.index = 0;
 });
 
 function mockSpawn(responses: string[]) {
@@ -211,7 +261,13 @@ describe("getDbDir", () => {
 describe("image_search", () => {
   beforeEach(() => {
     mockRows = [];
+    searchCache.clear();
+    searchIdCounters.clear();
     globalThis.__crossImageDecodeState = {
+      presets: [],
+      index: 0,
+    };
+    globalThis.__hashMockState = {
       presets: [],
       index: 0,
     };
@@ -335,7 +391,7 @@ describe("image_search", () => {
       ]),
     ]);
     mockFetchOk();
-    globalThis.__crossImageDecodeState.presets = [
+    globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
       { hash: 0xffffffffffffffffn, width: 100, height: 100 },
     ];
@@ -345,6 +401,7 @@ describe("image_search", () => {
     expect(result.output).toContain("Search Engine: Yandex");
     expect(result.output).toContain("Result A");
     expect(result.output).toContain("Result B");
+    expect(result.output).toContain("Visual Difference: 0.000");
     expect(result.attachments).toHaveLength(2);
     expect(result.attachments[0].type).toBe("file");
     expect(result.attachments[0].mime).toBe("image/png");
@@ -364,7 +421,7 @@ describe("image_search", () => {
       ]),
     ]);
     mockFetchOk();
-    globalThis.__crossImageDecodeState.presets = [{ hash: 111n, width: 100, height: 100 }];
+    globalThis.__hashMockState.presets = [{ hash: 111n, width: 100, height: 100 }];
 
     // biome-ignore lint/suspicious/noExplicitAny: structured result access
     const result = (await imageSearchTool.execute({ limit: 1 }, SESSION)) as any;
@@ -387,7 +444,7 @@ describe("image_search", () => {
     let callCount = 0;
     globalThis.fetch = mock(() => {
       callCount++;
-      if (callCount === 2) return Promise.reject(new Error("network error"));
+      if (callCount === 3) return Promise.reject(new Error("network error"));
       return Promise.resolve(
         new Response(MINI_PNG, {
           headers: { "Content-Type": "image/png" },
@@ -397,6 +454,7 @@ describe("image_search", () => {
 
     // biome-ignore lint/suspicious/noExplicitAny: structured result access
     const result = (await imageSearchTool.execute({}, SESSION)) as any;
+    expect(result.output).toContain("Visual Difference: ");
     expect(result.attachments).toHaveLength(1);
     expect(result.attachments[0].filename).toBe("result_1.png");
   });
@@ -411,7 +469,7 @@ describe("image_search", () => {
       ]),
     ]);
     mockFetchOk();
-    globalThis.__crossImageDecodeState.presets = [
+    globalThis.__hashMockState.presets = [
       { hash: 123n, width: 100, height: 100 },
       { hash: 123n, width: 100, height: 100 },
     ];
@@ -432,7 +490,7 @@ describe("image_search", () => {
       ]),
     ]);
     mockFetchOk();
-    globalThis.__crossImageDecodeState.presets = [
+    globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
       { hash: 0xffffffffffffffffn, width: 100, height: 100 },
     ];
@@ -455,7 +513,7 @@ describe("image_search", () => {
       ]),
     ]);
     mockFetchOk();
-    globalThis.__crossImageDecodeState.presets = [
+    globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
       { hash: 0xffffffffffffffffn, width: 100, height: 100 },
       { hash: 0n, width: 100, height: 100 },
@@ -478,7 +536,7 @@ describe("image_search", () => {
       ]),
     ]);
     mockFetchOk();
-    globalThis.__crossImageDecodeState.presets = [
+    globalThis.__hashMockState.presets = [
       { hash: 456n, width: 50, height: 50 },
       { hash: 456n, width: 200, height: 200 },
     ];
@@ -505,7 +563,7 @@ describe("image_search", () => {
       ]),
     ]);
     mockFetchOk();
-    globalThis.__crossImageDecodeState.presets = [
+    globalThis.__hashMockState.presets = [
       { hash: 0n, width: 50, height: 50 },
       { hash: 1023n, width: 200, height: 200 },
       { hash: 1047552n, width: 100, height: 100 },
@@ -516,6 +574,30 @@ describe("image_search", () => {
     expect(result.attachments).toHaveLength(1);
     expect(result.attachments[0].filename).toBe("result_1-3.png");
   });
+
+  it("populates search cache with page URLs from results", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "R1", pageUrl: "https://example.com/page/1", thumbnail: "https://example.com/1.jpg" },
+        { title: "R2", pageUrl: "https://example.com/page/2", thumbnail: "https://example.com/2.jpg" },
+      ]),
+    ]);
+    mockFetchOk();
+    globalThis.__hashMockState.presets = [
+      { hash: 0n, width: 100, height: 100 },
+      { hash: 0xFFFFFFFFFFFFFFFFn, width: 100, height: 100 },
+    ];
+
+    await imageSearchTool.execute({}, SESSION);
+    const cacheKey = "test-session::search::1";
+    const cached = searchCache.get(cacheKey);
+    expect(cached).toBeDefined();
+    expect(cached!.results).toHaveLength(2);
+    expect(cached!.results[0].pageUrl).toBe("https://example.com/page/1");
+    expect(cached!.results[1].pageUrl).toBe("https://example.com/page/2");
+  })
 
   it("formats a run of 5 consecutive duplicates as a range", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
@@ -530,7 +612,7 @@ describe("image_search", () => {
       ]),
     ]);
     mockFetchOk();
-    globalThis.__crossImageDecodeState.presets = [
+    globalThis.__hashMockState.presets = [
       { hash: 999n, width: 100, height: 100 },
       { hash: 999n, width: 100, height: 100 },
       { hash: 999n, width: 100, height: 100 },
@@ -544,3 +626,63 @@ describe("image_search", () => {
     expect(result.attachments[0].filename).toBe("result_1-5.png");
   });
 });
+
+
+
+describe("stripTrackingParams", () => {
+  it("removes utm_* parameters", () => {
+    const url = "https://example.com/page?utm_source=yandex&utm_medium=organic&q=value";
+    const result = stripTrackingParams(url);
+    expect(result).toBe("https://example.com/page?q=value");
+  });
+
+  it("removes fbclid, gclid, yclid, dclid, msclkid", () => {
+    const url = "https://example.com/page?fbclid=abc&gclid=def&yclid=ghi&dclid=jkl&msclkid=mno&keep=stay";
+    const result = stripTrackingParams(url);
+    expect(result).toBe("https://example.com/page?keep=stay");
+  });
+
+  it("removes _openstat and mc_* parameters", () => {
+    const url = "https://example.com/page?_openstat=track&mc_cid=123&mc_eid=456&real=param";
+    const result = stripTrackingParams(url);
+    expect(result).toBe("https://example.com/page?real=param");
+  });
+
+  it("returns URL unchanged when no tracking params present", () => {
+    const url = "https://example.com/page?q=search&page=1";
+    const result = stripTrackingParams(url);
+    expect(result).toBe(url);
+  });
+
+  it("removes trailing ? when all params are tracking", () => {
+    const url = "https://example.com/page?utm_source=yandex";
+    const result = stripTrackingParams(url);
+    expect(result).toBe("https://example.com/page");
+  });
+
+  it("handles URL without query string", () => {
+    const url = "https://example.com/page";
+    const result = stripTrackingParams(url);
+    expect(result).toBe(url);
+  });
+
+  it("handles malformed URL gracefully", () => {
+    const url = "not a url";
+    const result = stripTrackingParams(url);
+    expect(result).toBe(url);
+  });
+
+  it("handles URL with hash fragment", () => {
+    const url = "https://example.com/page?utm_source=yandex#section";
+    const result = stripTrackingParams(url);
+    expect(result).toBe("https://example.com/page#section");
+  });
+});
+
+
+
+
+
+
+
+

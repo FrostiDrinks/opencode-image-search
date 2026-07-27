@@ -1,9 +1,95 @@
+import { tool } from "@opencode-ai/plugin";
+import type { Hooks, PluginModule, ToolAttachment } from "@opencode-ai/plugin";
 import { Database } from "bun:sqlite";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Hooks, PluginModule, ToolAttachment } from "@opencode-ai/plugin";
-import { tool } from "@opencode-ai/plugin";
-import { Image } from "cross-image";
+import { perceptualHash, hammingDistance, PHASH_THRESHOLD } from "./hash";
+import { dctSignature, cosineDistance } from "./sig";
+
+// ── Search result cache (module-level) ────────────────────────────
+interface CachedResult {
+  title: string;
+  pageUrl: string;
+  thumbnailUrl: string;
+  width: number | null;
+  height: number | null;
+}
+
+interface CachedSearch {
+  searchId: number;
+  sourceImageUrl: string;
+  engine: string;
+  results: CachedResult[];
+  rawText: string;
+}
+
+const searchCache = new Map<string, CachedSearch>();
+const searchIdCounters = new Map<string, number>();
+
+function searchCachePath(): string {
+  return path.join(getDbDir(), "image_search_cache.json");
+}
+
+function loadSearchCacheFromDisk(): void {
+  try {
+    const raw = fs.readFileSync(searchCachePath(), "utf-8");
+    const parsed = JSON.parse(raw);
+    for (const [key, val] of Object.entries(parsed)) {
+      searchCache.set(key, val as CachedSearch);
+    }
+    for (const key of searchCache.keys()) {
+      const match = key.match(/::search::(\d+)$/);
+      if (match) {
+        const sid = parseInt(match[1], 10);
+        const sessionId = key.replace(/::search::\d+$/, "");
+        const current = searchIdCounters.get(sessionId) ?? 0;
+        if (sid > current) searchIdCounters.set(sessionId, sid);
+      }
+    }
+  } catch {}
+}
+
+function saveSearchCacheToDisk(): void {
+  try {
+    const obj: Record<string, CachedSearch> = {};
+    for (const [key, val] of searchCache) {
+      obj[key] = val;
+    }
+    const dir = path.dirname(searchCachePath());
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(searchCachePath(), JSON.stringify(obj), "utf-8");
+  } catch {}
+}
+
+loadSearchCacheFromDisk();
+
+function extractResultSections(text: string): Map<number, { title: string; pageUrl: string; thumbnailUrl: string; width: number | null; height: number | null }> {
+  const map = new Map<number, { title: string; pageUrl: string; thumbnailUrl: string; width: number | null; height: number | null }>();
+  const sections = text.split(/^--- Result (\d+) ---$/m);
+  for (let i = 1; i < sections.length - 1; i += 2) {
+    const idx = parseInt(sections[i], 10);
+    const body = sections[i + 1];
+    const titleMatch = body.match(/^Title:\s*(.+)$/m);
+    const urlMatch = body.match(/^URL:\s*(.+)$/m);
+    const thumbMatch = body.match(/^Thumbnail:\s*(.+)$/m);
+    let width: number | null = null;
+    let height: number | null = null;
+    const sizeMatch = body.match(/^Size:\s*(\d+)x(\d+)$/m);
+    if (sizeMatch) {
+      width = parseInt(sizeMatch[1], 10);
+      height = parseInt(sizeMatch[2], 10);
+    }
+    map.set(idx, {
+      title: titleMatch?.[1] ?? "",
+      pageUrl: urlMatch?.[1] ?? "",
+      thumbnailUrl: thumbMatch?.[1] ?? "",
+      width,
+      height,
+    });
+  }
+  return map;
+}
 
 interface FilePart {
   type: string;
@@ -57,7 +143,7 @@ async function readResponse(
   throw new Error("MCP response timeout or connection closed");
 }
 
-export function getDbDir(
+function getDbDir(
   platform = process.platform,
   appData = process.env.APPDATA,
   homeDir = os.homedir(),
@@ -77,6 +163,26 @@ function extractThumbnails(text: string): string[] {
   return urls;
 }
 
+function sanitizeSearchOutput(text: string): string {
+  return text
+    .replace(/^Thumbnail: .+$/gm, "")
+    .replace(/\n{3,}/g, "\n")
+    .trim();
+}
+
+function cleanUrlsInText(text: string, sections: Map<number, { pageUrl: string }>): string {
+  let result = text;
+  for (const [, s] of sections) {
+    if (s.pageUrl) {
+      const cleanUrl = stripTrackingParams(s.pageUrl);
+      if (cleanUrl !== s.pageUrl) {
+        result = result.replaceAll(`URL: ${s.pageUrl}`, `URL: ${cleanUrl}`);
+      }
+    }
+  }
+  return result;
+}
+
 async function fetchImageAsBuffer(
   url: string,
   signal?: AbortSignal,
@@ -88,43 +194,23 @@ async function fetchImageAsBuffer(
   return { buffer, mime };
 }
 
-const DHASH_THRESHOLD = 10;
 
-async function perceptualHash(
-  data: Uint8Array,
-): Promise<{ hash: bigint; width: number; height: number } | null> {
+
+function stripTrackingParams(url: string): string {
   try {
-    const img = await Image.decode(data);
-    const origWidth = img.width;
-    const origHeight = img.height;
-    img.resize({ width: 9, height: 8 });
-    const pixels = img.data;
-
-    let hash = 0n;
-    for (let y = 0; y < 8; y++) {
-      for (let x = 0; x < 8; x++) {
-        const idx = (y * 9 + x) * 4;
-        const idxNext = (y * 9 + x + 1) * 4;
-        const left = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
-        const right =
-          0.299 * pixels[idxNext] + 0.587 * pixels[idxNext + 1] + 0.114 * pixels[idxNext + 2];
-        if (left > right) hash |= 1n << BigInt(y * 8 + x);
-      }
+    const parsed = new URL(url);
+    const trackingParams = [
+      "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+      "fbclid", "gclid", "yclid", "dclid", "msclkid",
+      "_openstat", "from", "mc_cid", "mc_eid",
+    ];
+    for (const param of trackingParams) {
+      parsed.searchParams.delete(param);
     }
-    return { hash, width: origWidth, height: origHeight };
+    return parsed.toString();
   } catch {
-    return null;
+    return url;
   }
-}
-
-function hammingDistance(a: bigint, b: bigint): number {
-  let xor = a ^ b;
-  let count = 0;
-  while (xor > 0n) {
-    count += Number(xor & 1n);
-    xor >>= 1n;
-  }
-  return count;
 }
 
 interface ThumbnailResult {
@@ -153,7 +239,7 @@ function deduplicate(results: ThumbnailResult[]): { winner: ThumbnailResult; ind
 
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      if (hammingDistance(results[i].hash, results[j].hash) <= DHASH_THRESHOLD) {
+      if (hammingDistance(results[i].hash, results[j].hash) <= PHASH_THRESHOLD) {
         union(i, j);
       }
     }
@@ -193,6 +279,68 @@ function formatIndices(indices: number[]): string {
   return parts.join(",");
 }
 
+function getBlocklist(blocklist?: string[]): Set<string> {
+  const domains = new Set<string>();
+  const env = process.env.IMAGE_SEARCH_BLOCKLIST;
+  if (env) {
+    for (const d of env.split(",")) {
+      const t = d.trim().toLowerCase();
+      if (t) domains.add(t);
+    }
+  }
+  if (blocklist) {
+    for (const d of blocklist) {
+      const t = d.trim().toLowerCase();
+      if (t) domains.add(t);
+    }
+  }
+  return domains;
+}
+
+function matchesBlocklist(url: string, blocklist: Set<string>): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    for (const domain of blocklist) {
+      if (hostname === domain || hostname.endsWith("." + domain)) return true;
+    }
+  } catch {}
+  return false;
+}
+
+function filterBlockedResults(text: string, blocklist: Set<string>): string {
+  if (blocklist.size === 0) return text;
+
+  const parts = text.split(/^--- Result (\d+) ---$/m);
+  const header = parts[0];
+  const kept: string[] = [];
+  let newIdx = 1;
+
+  for (let i = 1; i < parts.length - 1; i += 2) {
+    const body = parts[i + 1];
+    const url = body.match(/^URL:\s*(.+)$/m)?.[1] ?? "";
+    if (!url || !matchesBlocklist(url, blocklist)) {
+      kept.push(`--- Result ${newIdx} ---`, body);
+      newIdx++;
+    }
+  }
+
+  if (kept.length === 0) return text;
+
+  const count = newIdx - 1;
+  let h = header.replace(
+    /^(Found )\d+( results.*?top )\d+/m,
+    `$1${count}$2${count}`,
+  );
+  if (h === header && count > 0) {
+    const nMatch = header.match(/(\d+)\s*results?/i);
+    if (nMatch) {
+      h = header.replace(/\d+\s*results?/i, `${count} results`);
+    }
+  }
+
+  return h.trimEnd() + "\n\n" + kept.join("\n");
+}
+
 const imageSearchTool = tool({
   description:
     "Retrieve an image from the session and perform a reverse image search. " +
@@ -225,6 +373,10 @@ const imageSearchTool = tool({
       .default(10)
       .optional()
       .describe("Max number of results (default: 10)"),
+    blocklist: tool.schema
+      .array(tool.schema.string())
+      .optional()
+      .describe("Domains to exclude from results (e.g. pinterest.com). Also read from IMAGE_SEARCH_BLOCKLIST env var (comma-separated)."),
   },
   async execute(args, context) {
     const db = new Database(path.join(getDbDir(), "opencode.db"), { readonly: true });
@@ -265,6 +417,8 @@ const imageSearchTool = tool({
     }
 
     const source = candidates[idx - 1].url;
+
+    const origFetch = fetchImageAsBuffer(source).catch(() => null);
 
     const proc = Bun.spawn(["uvx", "image-search-mcp"], {
       stdin: "pipe",
@@ -308,22 +462,79 @@ const imageSearchTool = tool({
       const result = (await readResponse(reader, 2)) as McpResponse;
 
       const text = result?.content?.[0]?.text ?? JSON.stringify(result);
+      const blocklist = getBlocklist(args.blocklist);
+      const filteredText = filterBlockedResults(text, blocklist);
+
+      const sections = extractResultSections(filteredText);
+      const cachedResults: CachedResult[] = [];
+      const sectionKeys = Array.from(sections.keys()).sort((a, b) => a - b);
+      for (const k of sectionKeys) {
+        const s = sections.get(k)!;
+        cachedResults.push({
+          title: s.title,
+          pageUrl: stripTrackingParams(s.pageUrl),
+          thumbnailUrl: s.thumbnailUrl,
+          width: s.width,
+          height: s.height,
+        });
+      }
+      if (cachedResults.length > 0) {
+        const searchId = (searchIdCounters.get(context.sessionID) ?? 0) + 1;
+        searchIdCounters.set(context.sessionID, searchId);
+        searchCache.set(`${context.sessionID}::search::${searchId}`, {
+          searchId,
+          sourceImageUrl: source,
+          engine: args.engine ?? "Yandex",
+          results: cachedResults,
+          rawText: text,
+        });
+        saveSearchCacheToDisk();
+      }
 
       const limit = args.limit ?? 10;
-      const thumbnailUrls = extractThumbnails(text).slice(0, limit);
-      if (thumbnailUrls.length === 0) return text;
+      const thumbnailUrls = extractThumbnails(filteredText).slice(0, limit);
+      if (thumbnailUrls.length === 0) return sanitizeSearchOutput(cleanUrlsInText(filteredText, sections));
 
+      const origResult = await origFetch;
+      const origSig = origResult ? await dctSignature(origResult.buffer) : null;
+
+      const distances = new Map<number, number>();
       const downloads: { resultIndex: number; buffer: Uint8Array; mime: string }[] = [];
       for (let i = 0; i < thumbnailUrls.length; i++) {
         try {
           const { buffer, mime } = await fetchImageAsBuffer(thumbnailUrls[i], context.abort);
           downloads.push({ resultIndex: i + 1, buffer, mime });
+          if (origSig) {
+            const thumbSig = await dctSignature(buffer);
+            if (thumbSig) {
+              distances.set(i + 1, cosineDistance(origSig.sig, thumbSig.sig));
+            }
+          }
         } catch {
           // skip thumbnails that fail to download
         }
       }
 
-      if (downloads.length === 0) return text;
+      if (downloads.length === 0) return sanitizeSearchOutput(cleanUrlsInText(filteredText, sections));
+
+      let textWithDist = filteredText;
+      if (distances.size > 0) {
+        const sorted = Array.from(distances.entries()).sort((a, b) => a[0] - b[0]);
+        for (const [idx, dist] of sorted.toReversed()) {
+          const nextPattern = `\n--- Result ${idx + 1} ---`;
+          const nextPos = textWithDist.indexOf(nextPattern);
+          if (nextPos !== -1) {
+            let walk = nextPos;
+            while (walk > 0 && (textWithDist[walk - 1] === '\n' || textWithDist[walk - 1] === '\r')) {
+              walk--;
+            }
+            textWithDist = textWithDist.slice(0, walk) + `\nVisual Difference: ${dist.toFixed(3)}` + textWithDist.slice(walk);
+          } else {
+            textWithDist = textWithDist.trimEnd() + `\nVisual Difference: ${dist.toFixed(3)}`;
+          }
+        }
+      }
+      const displayText = sanitizeSearchOutput(cleanUrlsInText(textWithDist, sections));
 
       const results: ThumbnailResult[] = [];
       for (const dl of downloads) {
@@ -339,7 +550,7 @@ const imageSearchTool = tool({
         }
       }
 
-      if (results.length === 0) return text;
+      if (results.length === 0) return displayText;
 
       const groups = deduplicate(results);
 
@@ -356,14 +567,14 @@ const imageSearchTool = tool({
         });
       }
 
-      return { output: text, attachments };
+      return { output: displayText, attachments };
     } finally {
       proc.kill();
     }
   },
 });
 
-export { imageSearchTool };
+export { imageSearchTool, searchCache, searchIdCounters, loadSearchCacheFromDisk, saveSearchCacheToDisk, getDbDir, stripTrackingParams };
 
 export default {
   id: "image_search",

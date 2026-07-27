@@ -2,7 +2,7 @@ import { dctSignature } from "./sig";
 
 const BLOCK = 5;
 
-export const PHASH_BITS = BLOCK * BLOCK - 1;
+const PHASH_BITS = BLOCK * BLOCK - 1;
 export const PHASH_THRESHOLD = Math.max(2, Math.floor(PHASH_BITS / 5));
 
 export async function perceptualHash(

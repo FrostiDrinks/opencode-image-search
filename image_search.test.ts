@@ -140,7 +140,7 @@ mock.module("node:fs", () => {
   return m;
 });
 
-import { getDbDir, stripTrackingParams, imageSearchTool, searchCache, searchIdCounters, loadSearchCacheFromDisk, saveSearchCacheToDisk } from "./src/index";
+import { getDbDir, stripTrackingParams, imageSearchTool, searchCache, searchIdCounters } from "./src/index";
 
 // --- Helpers ---
 const encoder = new TextEncoder();
@@ -679,10 +679,83 @@ describe("stripTrackingParams", () => {
   });
 });
 
+describe("blocklist", () => {
+  beforeEach(() => {
+    mockRows = [];
+    searchCache.clear();
+    searchIdCounters.clear();
+    globalThis.__crossImageDecodeState = { presets: [], index: 0 };
+    globalThis.__hashMockState = { presets: [], index: 0 };
+  });
 
+  it("keeps all results when blocklist has no matches", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "A", thumbnail: "https://ex.com/a.jpg", pageUrl: "https://ex.com/1" },
+        { title: "B", thumbnail: "https://ex.com/b.jpg", pageUrl: "https://ex.com/2" },
+      ]),
+    ]);
+    mockFetchOk();
+    globalThis.__hashMockState.presets = [
+      { hash: 0n, width: 100, height: 100 },
+      { hash: 0xFFFFFFn, width: 100, height: 100 },
+    ];
+    const result = (await imageSearchTool.execute({ blocklist: ["other.example"] }, SESSION)) as any;
+    expect(result.output).toContain("Title: A");
+    expect(result.output).toContain("Title: B");
+    expect(result.attachments).toHaveLength(2);
+  });
 
+  it("removes results from blocklisted domains", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "Keep", thumbnail: "https://good.com/a.jpg", pageUrl: "https://good.com/1" },
+        { title: "Block", thumbnail: "https://bad.com/b.jpg", pageUrl: "https://bad.com/2" },
+      ]),
+    ]);
+    mockFetchOk();
+    globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
 
+    const result = (await imageSearchTool.execute({ blocklist: ["bad.com"] }, SESSION)) as any;
+    expect(result.output).toContain("Keep");
+    expect(result.output).not.toContain("Block");
+    expect(result.attachments).toHaveLength(1);
+    expect(result.attachments[0].filename).toBe("result_1.png");
+  });
 
+  it("returns message when all results are blocked", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "A", thumbnail: "https://bad.com/a.jpg", pageUrl: "https://bad.com/1" },
+      ]),
+    ]);
+    mockFetchOk();
 
+    const result = await imageSearchTool.execute({ blocklist: ["bad.com"] }, SESSION);
+    expect(result).toContain("blocklist");
+  });
 
+  it("blocks subdomains of blocklisted domains", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+    mockSpawn([
+      mcpInit,
+      mcpResultWithThumbnails("Yandex", [
+        { title: "A", thumbnail: "https://sub.bad.com/a.jpg", pageUrl: "https://sub.bad.com/1" },
+        { title: "B", thumbnail: "https://good.com/b.jpg", pageUrl: "https://good.com/2" },
+      ]),
+    ]);
+    mockFetchOk();
+    globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
 
+    const result = (await imageSearchTool.execute({ blocklist: ["bad.com"] }, SESSION)) as any;
+    expect(result.output).not.toContain("Title: A");
+    expect(result.output).toContain("Title: B");
+    expect(result.attachments).toHaveLength(1);
+  });
+});

@@ -240,7 +240,7 @@ function stripTrackingParams(url: string): string {
     const trackingParams = [
       "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
       "fbclid", "gclid", "yclid", "dclid", "msclkid",
-      "_openstat", "from", "mc_cid", "mc_eid",
+      "_openstat", "mc_cid", "mc_eid",
     ];
     for (const param of trackingParams) {
       parsed.searchParams.delete(param);
@@ -362,7 +362,7 @@ function filterBlockedResults(text: string, blocklist: Set<string>): string {
     }
   }
 
-  if (kept.length === 0) return text;
+  if (kept.length === 0) return "All results were filtered by domain blocklist";
 
   const count = newIdx - 1;
   let h = header.replace(

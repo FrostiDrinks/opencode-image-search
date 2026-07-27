@@ -23,6 +23,7 @@ The plugin registers a single tool (`image_search`) via the `tool` hook in `src/
 | `filename` | `string?` | — | Filter by filename (case-insensitive) |
 | `engine` | `string?` | `"Yandex"` | Yandex, SauceNAO, Google, TraceMoe, Ascii2D, EHentai, Iqdb, BaiDu, Bing, GoogleLens, Tineye |
 | `limit` | `number?` | `10` | Max results |
+| `blocklist` | `string[]?` | — | Domains to exclude (e.g. `x.com`). Also read from `IMAGE_SEARCH_BLOCKLIST` env var. |
 
 ## Environment variables
 
@@ -37,8 +38,8 @@ These are inherited from OpenCode each time the tool is invoked. Set them via Op
 
 ## Code conventions
 
-- Single `src/index.ts` file with an npm `package.json`.
-- Depends on `@opencode-ai/plugin` (provided by the OpenCode runtime), `cross-image` (image decoding for perceptual hashing), and `bun:sqlite` (built into Bun).
+- Main entry `src/index.ts` with helper modules `src/hash.ts` (perceptual hashing via DCT) and `src/sig.ts` (DCT signature computation), plus an npm `package.json`.
+- Depends on `@opencode-ai/plugin` (provided by the OpenCode runtime), `cross-image` (image decoding for DCT-based signature computation), and `bun:sqlite` (built into Bun).
 - Read-only DB access, clean up resources in `finally` blocks.
 
 ## Limitations

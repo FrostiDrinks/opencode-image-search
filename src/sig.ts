@@ -3,7 +3,7 @@ import { Image } from "cross-image";
 const RESIZE = 32;
 const BLOCK = 8;
 
-export const SIG_THRESHOLD = 0.1;
+
 
 export async function dctSignature(
   data: Uint8Array,

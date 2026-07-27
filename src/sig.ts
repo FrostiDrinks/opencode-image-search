@@ -3,8 +3,6 @@ import { Image } from "cross-image";
 const RESIZE = 32;
 const BLOCK = 8;
 
-
-
 export async function dctSignature(
   data: Uint8Array,
 ): Promise<{ sig: Float64Array; width: number; height: number } | null> {

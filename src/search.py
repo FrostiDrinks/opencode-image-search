@@ -8,11 +8,11 @@
 import json
 import os
 import sys
+from http.cookies import SimpleCookie
 
 from PicImageSearch.model.base import BaseSearchItem
 
 ENGINE_MAP: dict[str, type] = {}
-_LOCKED = False
 
 
 def _register(cls: type) -> type:
@@ -25,7 +25,7 @@ class SyncYandex:
     def __init__(self) -> None:
         from PicImageSearch.sync import Yandex
 
-        self._engine = Yandex(**proxy_kwargs())
+        self._engine = Yandex(**proxy_kwargs(), **cookies_kwargs())
 
     def search(self, url: str, limit: int) -> list[dict]:
         result = self._engine.search(url=url)
@@ -41,7 +41,7 @@ class SyncSauceNAO:
         api_key = os.environ.get("IMAGE_SEARCH_API_KEY")
         if api_key:
             kwargs["api_key"] = api_key
-        self._engine = SauceNAO(**kwargs)
+        self._engine = SauceNAO(**kwargs, **cookies_kwargs())
 
     def search(self, url: str, limit: int) -> list[dict]:
         result = self._engine.search(url=url)
@@ -53,7 +53,7 @@ class SyncAscii2D:
     def __init__(self) -> None:
         from PicImageSearch.sync import Ascii2D
 
-        self._engine = Ascii2D(**proxy_kwargs())
+        self._engine = Ascii2D(**proxy_kwargs(), **cookies_kwargs())
 
     def search(self, url: str, limit: int) -> list[dict]:
         result = self._engine.search(url=url)
@@ -79,7 +79,7 @@ class SyncBing:
     def __init__(self) -> None:
         from PicImageSearch.sync import Bing
 
-        self._engine = Bing(**proxy_kwargs())
+        self._engine = Bing(**proxy_kwargs(), **cookies_kwargs())
 
     def search(self, url: str, limit: int) -> list[dict]:
         result = self._engine.search(url=url)
@@ -91,7 +91,7 @@ class SyncIqdb:
     def __init__(self) -> None:
         from PicImageSearch.sync import Iqdb
 
-        self._engine = Iqdb(**proxy_kwargs())
+        self._engine = Iqdb(**proxy_kwargs(), **cookies_kwargs())
 
     def search(self, url: str, limit: int) -> list[dict]:
         result = self._engine.search(url=url)
@@ -103,7 +103,7 @@ class SyncTraceMoe:
     def __init__(self) -> None:
         from PicImageSearch.sync import TraceMoe
 
-        self._engine = TraceMoe(**proxy_kwargs())
+        self._engine = TraceMoe(**proxy_kwargs(), **cookies_kwargs())
 
     def search(self, url: str, limit: int) -> list[dict]:
         result = self._engine.search(url=url)
@@ -128,7 +128,7 @@ class SyncTineye:
     def __init__(self) -> None:
         from PicImageSearch.sync import Tineye
 
-        self._engine = Tineye(**proxy_kwargs())
+        self._engine = Tineye(**proxy_kwargs(), **cookies_kwargs())
 
     def search(self, url: str, limit: int) -> list[dict]:
         result = self._engine.search(url=url)
@@ -140,7 +140,7 @@ class SyncGoogleLens:
     def __init__(self) -> None:
         from PicImageSearch.sync import GoogleLens
 
-        self._engine = GoogleLens(**proxy_kwargs())
+        self._engine = GoogleLens(**proxy_kwargs(), **cookies_kwargs())
 
     def search(self, url: str, limit: int) -> list[dict]:
         result = self._engine.search(url=url)
@@ -152,7 +152,7 @@ class SyncEHentai:
     def __init__(self) -> None:
         from PicImageSearch.sync import EHentai
 
-        self._engine = EHentai(**proxy_kwargs())
+        self._engine = EHentai(**proxy_kwargs(), **cookies_kwargs())
 
     def search(self, url: str, limit: int) -> list[dict]:
         result = self._engine.search(url=url)
@@ -164,7 +164,7 @@ class SyncBaiDu:
     def __init__(self) -> None:
         from PicImageSearch.sync import BaiDu
 
-        self._engine = BaiDu(**proxy_kwargs())
+        self._engine = BaiDu(**proxy_kwargs(), **cookies_kwargs())
 
     def search(self, url: str, limit: int) -> list[dict]:
         result = self._engine.search(url=url)
@@ -180,6 +180,18 @@ def proxy_kwargs() -> dict:
     if not proxy:
         return {}
     return {"proxies": {"all://": proxy}}
+
+
+def cookies_kwargs() -> dict:
+    raw = os.environ.get("IMAGE_SEARCH_COOKIES")
+    if not raw:
+        return {}
+    try:
+        c = SimpleCookie(raw)
+        cookies = {k: v.value for k, v in c.items()}
+        return {"cookies": cookies} if cookies else {}
+    except Exception:
+        return {}
 
 
 def _items(raw: list[BaseSearchItem], limit: int, fields: tuple[str, ...]) -> list[dict]:

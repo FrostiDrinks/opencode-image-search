@@ -163,11 +163,49 @@ function extractThumbnails(text: string): string[] {
   return urls;
 }
 
-function sanitizeSearchOutput(text: string): string {
-  return text
-    .replace(/^Thumbnail: .+$/gm, "")
-    .replace(/\n{3,}/g, "\n")
-    .trim();
+function isDuplicateContent(titleLine: string, contentLine: string): boolean {
+  const a = titleLine.replace(/^Title:\s*/i, "").toLowerCase().trim();
+  const b = contentLine.replace(/^Content:\s*/i, "").toLowerCase().trim();
+  if (a === b) return true;
+  if (a.includes(b) || b.includes(a)) return true;
+
+  const tokenize = (s: string) =>
+    new Set(s.split(/[^a-z0-9]+/).filter(Boolean));
+  const ta = tokenize(a);
+  const tb = tokenize(b);
+  let intersection = 0;
+  for (const t of ta) if (tb.has(t)) intersection++;
+  const union = ta.size + tb.size - intersection;
+  return union > 0 && intersection / union >= 0.7;
+}
+
+function reformatResults(text: string): string {
+  const FIELD_ORDER = ["Title", "Content", "URL", "Source", "Size", "Visual Difference"];
+
+  const parts = text.split(/^--- Result (\d+) ---$/m);
+  if (parts.length < 3) return text.trim();
+
+  const header = parts[0].trim();
+
+  const rebuilt: string[] = [];
+  for (let i = 1; i < parts.length - 1; i += 2) {
+    const idx = parseInt(parts[i], 10);
+    const body = parts[i + 1];
+    const lines = body.split("\n");
+
+    const fields: Record<string, string> = {};
+    for (const line of lines) {
+      const m = line.match(/^(Title|URL|Source|Content|Size|Visual Difference|Thumbnail):/);
+      if (m) fields[m[1]] = line;
+    }
+
+    const sectionLines = FIELD_ORDER.filter(
+      (k) => fields[k] && !(k === "Content" && fields["Title"] && isDuplicateContent(fields["Title"], fields[k])),
+    ).map((k) => fields[k]!);
+    rebuilt.push(`--- Result ${idx} ---\n${sectionLines.join("\n")}`);
+  }
+
+  return (header ? header + "\n\n" : "") + rebuilt.join("\n\n");
 }
 
 function cleanUrlsInText(text: string, sections: Map<number, { pageUrl: string }>): string {
@@ -493,7 +531,7 @@ const imageSearchTool = tool({
 
       const limit = args.limit ?? 10;
       const thumbnailUrls = extractThumbnails(filteredText).slice(0, limit);
-      if (thumbnailUrls.length === 0) return sanitizeSearchOutput(cleanUrlsInText(filteredText, sections));
+      if (thumbnailUrls.length === 0) return reformatResults(cleanUrlsInText(filteredText, sections));
 
       const origResult = await origFetch;
       const origSig = origResult ? await dctSignature(origResult.buffer) : null;
@@ -515,7 +553,7 @@ const imageSearchTool = tool({
         }
       }
 
-      if (downloads.length === 0) return sanitizeSearchOutput(cleanUrlsInText(filteredText, sections));
+      if (downloads.length === 0) return reformatResults(cleanUrlsInText(filteredText, sections));
 
       let textWithDist = filteredText;
       if (distances.size > 0) {
@@ -534,7 +572,7 @@ const imageSearchTool = tool({
           }
         }
       }
-      const displayText = sanitizeSearchOutput(cleanUrlsInText(textWithDist, sections));
+      const displayText = reformatResults(cleanUrlsInText(textWithDist, sections));
 
       const results: ThumbnailResult[] = [];
       for (const dl of downloads) {

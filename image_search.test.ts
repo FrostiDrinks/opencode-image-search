@@ -385,7 +385,7 @@ describe("image_search", () => {
     expect(result.output).toContain("Search Engine: Yandex");
     expect(result.output).toContain("Result A");
     expect(result.output).toContain("Result B");
-    expect(result.output).toContain("Visual Difference: 0.000");
+    expect(result.output).toContain("Visual Distance: 0.000");
     expect(result.attachments).toHaveLength(2);
     expect(result.attachments[0].type).toBe("file");
     expect(result.attachments[0].mime).toBe("image/png");
@@ -432,7 +432,7 @@ describe("image_search", () => {
 
     // biome-ignore lint/suspicious/noExplicitAny: structured result access
     const result = (await imageSearchTool.execute({}, SESSION)) as any;
-    expect(result.output).toContain("Visual Difference: ");
+    expect(result.output).toContain("Visual Distance: ");
     expect(result.attachments).toHaveLength(1);
     expect(result.attachments[0].filename).toBe("result_1.png");
   });

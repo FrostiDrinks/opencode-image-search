@@ -19,6 +19,17 @@ interface SearchResult {
   width?: number;
   height?: number;
   similarity?: number;
+  content?: string;
+  author?: string;
+  image_url?: string;
+  other_source?: string;
+  episode?: number;
+  domain?: string;
+  crawl_date?: string;
+  site_name?: string;
+  type?: string;
+  date?: string;
+  tags?: string[];
 }
 
 interface SearchResponse {
@@ -248,9 +259,21 @@ function formatResultsText(engine: string, results: SearchResult[], distances: M
     if (r.source) lines.push(`Source: ${r.source}`);
     if (r.similarity !== undefined) lines.push(`Similarity: ${r.similarity.toFixed(1)}%`);
     if (r.size) lines.push(`Size: ${r.size}`);
-    if (r.thumbnail) lines.push(`Thumbnail: ${r.thumbnail}`);
+    if (r.content !== undefined) {
+      const skip = r.title && (r.content === r.title || r.title.includes(r.content) || r.content.includes(r.title));
+      if (!skip) lines.push(`Content: ${r.content}`);
+    }
+    if (r.author) lines.push(`Author: ${r.author}`);
+    if (r.other_source) lines.push(`Other Source: ${r.other_source}`);
+    if (r.episode !== undefined) lines.push(`Episode: ${r.episode}`);
+    if (r.domain) lines.push(`Domain: ${r.domain}`);
+    if (r.crawl_date) lines.push(`Crawl Date: ${r.crawl_date}`);
+    if (r.site_name) lines.push(`Site: ${r.site_name}`);
+    if (r.type) lines.push(`Type: ${r.type}`);
+    if (r.date) lines.push(`Date: ${r.date}`);
+    if (r.tags && r.tags.length > 0) lines.push(`Tags: ${r.tags.join(", ")}`);
     const dist = distances.get(r.index);
-    if (dist !== undefined) lines.push(`Visual Difference: ${dist.toFixed(3)}`);
+    if (dist !== undefined) lines.push(`Visual Distance: ${dist.toFixed(3)}`);
   }
 
   return lines.join("\n");
@@ -401,9 +424,10 @@ const imageSearchTool = tool({
     }
 
     const limit = args.limit ?? 10;
-    const thumbnailUrls = results.map((r) => r.thumbnail ?? "").filter(Boolean).slice(0, limit);
+    const bestImageUrl = (r: SearchResult) => r.image_url || r.thumbnail;
+    const imageUrls = results.map((r) => bestImageUrl(r)).filter(Boolean).slice(0, limit);
 
-    if (thumbnailUrls.length === 0) {
+    if (imageUrls.length === 0) {
       return formatResultsText(response.engine, results, new Map());
     }
 
@@ -414,10 +438,11 @@ const imageSearchTool = tool({
     const downloads: { resultIndex: number; buffer: Uint8Array; mime: string }[] = [];
     let downloadCount = 0;
     for (const r of results) {
-      if (!r.thumbnail || downloadCount >= limit) continue;
+      const url = bestImageUrl(r);
+      if (!url || downloadCount >= limit) continue;
       downloadCount++;
       try {
-        const { buffer, mime } = await fetchImageAsBuffer(r.thumbnail, context.abort);
+        const { buffer, mime } = await fetchImageAsBuffer(url, context.abort);
         downloads.push({ resultIndex: r.index, buffer, mime });
         if (origSig) {
           const thumbSig = await dctSignature(buffer);

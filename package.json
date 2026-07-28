@@ -13,6 +13,7 @@
   },
   "files": [
     "src",
+    "src/search.py",
     "LICENSE",
     "README.md"
   ],

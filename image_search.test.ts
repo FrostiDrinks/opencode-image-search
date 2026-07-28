@@ -361,9 +361,10 @@ describe("image_search", () => {
 
   it("returns error message from search script", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(JSON.stringify({ error: "network error" }));
+    mockSpawn(JSON.stringify({ engine: "Yandex", error: "network error" }));
     const result = await imageSearchTool.execute({}, SESSION);
     expect(result).toContain("Search failed");
+    expect(result).toContain("Yandex");
     expect(result).toContain("network error");
   });
 
@@ -699,5 +700,89 @@ describe("blocklist", () => {
     expect(result.output).not.toContain("Title: A");
     expect(result.output).toContain("Title: B");
     expect(result.attachments).toHaveLength(1);
+  });
+
+  it("reads blocklist from IMAGE_SEARCH_BLOCKLIST env var", async () => {
+    const orig = process.env.IMAGE_SEARCH_BLOCKLIST;
+    process.env.IMAGE_SEARCH_BLOCKLIST = "bad.com";
+    try {
+      mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+      mockSpawn(jsonResponse("Yandex", [
+        { index: 1, title: "Keep", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
+        { index: 2, title: "Block", url: "https://bad.com/2", thumbnail: "https://bad.com/b.jpg" },
+      ]));
+      mockFetchOk();
+      globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
+
+      const result = (await imageSearchTool.execute({}, SESSION)) as any;
+      expect(result.output).toContain("Keep");
+      expect(result.output).not.toContain("Block");
+      expect(result.attachments).toHaveLength(1);
+    } finally {
+      process.env.IMAGE_SEARCH_BLOCKLIST = orig;
+    }
+  });
+});
+
+describe("Python script JSON contract", () => {
+  it("accepts a data URI via stdin and returns valid JSON output", async () => {
+    const dataUri = `data:image/png;base64,${MINI_PNG.toString("base64")}`;
+    const proc = Bun.spawn(["uv", "run", path.join(import.meta.dir, "src/search.py")], {
+      stdin: "pipe",
+      stdout: "pipe",
+    });
+    proc.stdin.write(JSON.stringify({
+      source: dataUri,
+      engine: "Yandex",
+      limit: 1,
+    }));
+    proc.stdin.end();
+
+    const reader = proc.stdout.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) buf += decoder.decode(value, { stream: true });
+    }
+    proc.kill();
+
+    expect(() => JSON.parse(buf)).not.toThrow();
+    const parsed = JSON.parse(buf);
+    // Should have either an error or a valid search response
+    expect(parsed.error || parsed.engine).toBeDefined();
+    if (parsed.results) {
+      expect(parsed.engine).toBe("Yandex");
+      expect(typeof parsed.count).toBe("number");
+      expect(Array.isArray(parsed.results)).toBeTrue();
+    }
+  });
+
+  it("reports error for unknown engine", async () => {
+    const proc = Bun.spawn(["uv", "run", path.join(import.meta.dir, "src/search.py")], {
+      stdin: "pipe",
+      stdout: "pipe",
+    });
+    proc.stdin.write(JSON.stringify({
+      source: "https://example.com/img.jpg",
+      engine: "FakeEngine",
+      limit: 1,
+    }));
+    proc.stdin.end();
+
+    const reader = proc.stdout.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) buf += decoder.decode(value, { stream: true });
+    }
+    proc.kill();
+
+    const parsed = JSON.parse(buf);
+    expect(parsed.error).toBeDefined();
+    expect(parsed.error).toContain("Unknown engine");
   });
 });

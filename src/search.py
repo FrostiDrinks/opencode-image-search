@@ -5,8 +5,10 @@
 # ]
 # ///
 
+import base64
 import json
 import os
+import re
 import sys
 from http.cookies import SimpleCookie
 
@@ -27,8 +29,9 @@ class SyncYandex:
 
         self._engine = Yandex(**proxy_kwargs(), **cookies_kwargs())
 
-    def search(self, url: str, limit: int) -> list[dict]:
-        result = self._engine.search(url=url)
+    def search(self, **kwargs) -> list[dict]:
+        limit = kwargs.pop("limit", 10)
+        result = self._engine.search(**kwargs)
         return _items(result.raw, limit, ("title", "url", "thumbnail", "source", "content", "size"))
 
 
@@ -43,8 +46,9 @@ class SyncSauceNAO:
             kwargs["api_key"] = api_key
         self._engine = SauceNAO(**kwargs, **cookies_kwargs())
 
-    def search(self, url: str, limit: int) -> list[dict]:
-        result = self._engine.search(url=url)
+    def search(self, **kwargs) -> list[dict]:
+        limit = kwargs.pop("limit", 10)
+        result = self._engine.search(**kwargs)
         return _items(result.raw, limit, ("title", "url", "thumbnail", "similarity", "source", "author"))
 
 
@@ -55,8 +59,9 @@ class SyncAscii2D:
 
         self._engine = Ascii2D(**proxy_kwargs(), **cookies_kwargs())
 
-    def search(self, url: str, limit: int) -> list[dict]:
-        result = self._engine.search(url=url)
+    def search(self, **kwargs) -> list[dict]:
+        limit = kwargs.pop("limit", 10)
+        result = self._engine.search(**kwargs)
         items = []
         for i, item in enumerate(result.raw[:limit]):
             entry = {
@@ -81,8 +86,9 @@ class SyncBing:
 
         self._engine = Bing(**proxy_kwargs(), **cookies_kwargs())
 
-    def search(self, url: str, limit: int) -> list[dict]:
-        result = self._engine.search(url=url)
+    def search(self, **kwargs) -> list[dict]:
+        limit = kwargs.pop("limit", 10)
+        result = self._engine.search(**kwargs)
         return _items(result.raw, limit, ("title", "url", "thumbnail", "image_url"))
 
 
@@ -93,8 +99,9 @@ class SyncIqdb:
 
         self._engine = Iqdb(**proxy_kwargs(), **cookies_kwargs())
 
-    def search(self, url: str, limit: int) -> list[dict]:
-        result = self._engine.search(url=url)
+    def search(self, **kwargs) -> list[dict]:
+        limit = kwargs.pop("limit", 10)
+        result = self._engine.search(**kwargs)
         return _items(result.raw, limit, ("content", "source", "other_source", "size", "url", "thumbnail"))
 
 
@@ -105,8 +112,9 @@ class SyncTraceMoe:
 
         self._engine = TraceMoe(**proxy_kwargs(), **cookies_kwargs())
 
-    def search(self, url: str, limit: int) -> list[dict]:
-        result = self._engine.search(url=url)
+    def search(self, **kwargs) -> list[dict]:
+        limit = kwargs.pop("limit", 10)
+        result = self._engine.search(**kwargs)
         items = []
         for i, item in enumerate(result.raw[:limit]):
             entry = {
@@ -130,8 +138,9 @@ class SyncTineye:
 
         self._engine = Tineye(**proxy_kwargs(), **cookies_kwargs())
 
-    def search(self, url: str, limit: int) -> list[dict]:
-        result = self._engine.search(url=url)
+    def search(self, **kwargs) -> list[dict]:
+        limit = kwargs.pop("limit", 10)
+        result = self._engine.search(**kwargs)
         return _items(result.raw, limit, ("title", "url", "thumbnail", "domain", "size", "crawl_date"))
 
 
@@ -142,8 +151,9 @@ class SyncGoogleLens:
 
         self._engine = GoogleLens(**proxy_kwargs(), **cookies_kwargs())
 
-    def search(self, url: str, limit: int) -> list[dict]:
-        result = self._engine.search(url=url)
+    def search(self, **kwargs) -> list[dict]:
+        limit = kwargs.pop("limit", 10)
+        result = self._engine.search(**kwargs)
         return _items(result.raw, limit, ("title", "url", "thumbnail", "site_name"))
 
 
@@ -154,8 +164,9 @@ class SyncEHentai:
 
         self._engine = EHentai(**proxy_kwargs(), **cookies_kwargs())
 
-    def search(self, url: str, limit: int) -> list[dict]:
-        result = self._engine.search(url=url)
+    def search(self, **kwargs) -> list[dict]:
+        limit = kwargs.pop("limit", 10)
+        result = self._engine.search(**kwargs)
         return _items(result.raw, limit, ("title", "url", "thumbnail", "type", "date", "tags"))
 
 
@@ -166,8 +177,9 @@ class SyncBaiDu:
 
         self._engine = BaiDu(**proxy_kwargs(), **cookies_kwargs())
 
-    def search(self, url: str, limit: int) -> list[dict]:
-        result = self._engine.search(url=url)
+    def search(self, **kwargs) -> list[dict]:
+        limit = kwargs.pop("limit", 10)
+        result = self._engine.search(**kwargs)
         return _items(result.raw, limit, ("title", "url", "thumbnail", "similarity"))
 
 
@@ -242,6 +254,14 @@ ENGINE_ALIASES: dict[str, str] = {
 ENGINE_NAMES: set[str] = set(ENGINE_MAP.keys())
 
 
+def _resolve_source(source: str) -> dict:
+    if source.startswith("data:"):
+        match = re.match(r"^data:[^;]*;base64,(.+)$", source)
+        if match:
+            return {"file": base64.b64decode(match.group(1))}
+    return {"url": source}
+
+
 def main() -> None:
     try:
         args = json.loads(sys.stdin.read())
@@ -266,14 +286,17 @@ def main() -> None:
 
     try:
         engine = engine_cls()
-        items = engine.search(url=source, limit=limit)
+        items = engine.search(**_resolve_source(source), limit=limit)
         print(json.dumps({"engine": engine_name, "count": len(items), "results": items}, default=str))
     except Exception as e:
-        _error(str(e))
+        _error(str(e), engine_name)
 
 
-def _error(msg: str) -> None:
-    print(json.dumps({"error": msg}))
+def _error(msg: str, engine: str = "") -> None:
+    error: dict[str, str] = {"error": msg}
+    if engine:
+        error["engine"] = engine
+    print(json.dumps(error))
 
 
 if __name__ == "__main__":

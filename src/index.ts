@@ -244,6 +244,22 @@ function filterBlockedResults(results: SearchResult[], blocklist: Set<string>): 
   return filtered.map((r, i) => ({ ...r, index: i + 1 }));
 }
 
+function filterBySite(results: SearchResult[], site: string): SearchResult[] {
+  const q = site.trim().toLowerCase();
+  if (!q) return results;
+  const filtered = results.filter((r) => {
+    const url = r.url ?? "";
+    if (!url) return false;
+    try {
+      const hostname = new URL(url).hostname.toLowerCase();
+      return hostname === q || hostname.endsWith("." + q);
+    } catch {
+      return false;
+    }
+  });
+  return filtered.map((r, i) => ({ ...r, index: i + 1 }));
+}
+
 function formatResultsText(engine: string, results: SearchResult[], distances: Map<number, number>): string {
   if (results.length === 0) return `Search Engine: ${engine}\nNo results found`;
 
@@ -318,6 +334,10 @@ const imageSearchTool = tool({
       .array(tool.schema.string())
       .optional()
       .describe("Domains to exclude from results (e.g. x.com). Also read from IMAGE_SEARCH_BLOCKLIST env var (comma-separated)."),
+    site: tool.schema
+      .string()
+      .optional()
+      .describe("Only return results from this domain (e.g. y.com). Takes precedence over blocklist."),
   },
   async execute(args, context) {
     const db = new Database(path.join(getDbDir(), "opencode.db"), { readonly: true });
@@ -396,7 +416,9 @@ const imageSearchTool = tool({
     }
 
     const blocklist = getBlocklist(args.blocklist);
-    const results = filterBlockedResults(response.results, blocklist);
+    const results = args.site
+      ? filterBySite(response.results, args.site)
+      : filterBlockedResults(response.results, blocklist);
 
     const cachedResults: CachedResult[] = results.map((r) => ({
       title: r.title ?? "",
@@ -422,7 +444,7 @@ const imageSearchTool = tool({
     if (results.length === 0) {
       const hadResults = response.results.length > 0;
       return hadResults
-        ? "All results were filtered by domain blocklist"
+        ? `All results were filtered by ${args.site ? `site filter (${args.site})` : "domain blocklist"}`
         : `Search Engine: ${response.engine}\nNo results found`;
     }
 

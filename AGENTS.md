@@ -24,6 +24,7 @@ The plugin registers a single tool (`image_search`) via the `tool` hook in `src/
 | `engine` | `string?` | `"Yandex"` | Yandex, SauceNAO, Google, TraceMoe, Ascii2D, EHentai, Iqdb, BaiDu, Bing, GoogleLens, Tineye |
 | `limit` | `number?` | `10` | Max results |
 | `blocklist` | `string[]?` | — | Domains to exclude (e.g. `x.com`). Also read from `IMAGE_SEARCH_BLOCKLIST` env var. |
+| `site` | `string?` | — | Only return results from this domain (e.g. `y.com`). Takes precedence over blocklist. |
 
 ## Environment variables
 

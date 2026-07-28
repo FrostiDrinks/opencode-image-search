@@ -255,25 +255,28 @@ function formatResultsText(engine: string, results: SearchResult[], distances: M
   for (const r of results) {
     lines.push("", `--- Result ${r.index} ---`);
     if (r.title) lines.push(`Title: ${r.title}`);
-    if (r.url) lines.push(`URL: ${stripTrackingParams(r.url)}`);
-    if (r.source) lines.push(`Source: ${r.source}`);
-    if (r.similarity !== undefined) lines.push(`Similarity: ${r.similarity.toFixed(1)}%`);
-    if (r.size) lines.push(`Size: ${r.size}`);
+    if (r.episode !== undefined) lines.push(`Episode: ${r.episode}`);
     if (r.content !== undefined) {
       const skip = r.title && (r.content === r.title || r.title.includes(r.content) || r.content.includes(r.title));
       if (!skip) lines.push(`Content: ${r.content}`);
     }
     if (r.author) lines.push(`Author: ${r.author}`);
-    if (r.other_source) lines.push(`Other Source: ${r.other_source}`);
-    if (r.episode !== undefined) lines.push(`Episode: ${r.episode}`);
-    if (r.domain) lines.push(`Domain: ${r.domain}`);
-    if (r.crawl_date) lines.push(`Crawl Date: ${r.crawl_date}`);
-    if (r.site_name) lines.push(`Site: ${r.site_name}`);
     if (r.type) lines.push(`Type: ${r.type}`);
-    if (r.date) lines.push(`Date: ${r.date}`);
     if (r.tags && r.tags.length > 0) lines.push(`Tags: ${r.tags.join(", ")}`);
+    if (r.url) lines.push(`URL: ${stripTrackingParams(r.url)}`);
+    if (r.site_name) lines.push(`Site: ${r.site_name}`);
+    if (r.domain) lines.push(`Domain: ${r.domain}`);
+    if (r.source) lines.push(`Source: ${r.source}`);
+    if (r.other_source) lines.push(`Other Source: ${r.other_source}`);
+    if (r.date) lines.push(`Date: ${r.date}`);
+    if (r.crawl_date) lines.push(`Crawl Date: ${r.crawl_date}`);
+    if (r.size) lines.push(`Size: ${r.size}`);
     const dist = distances.get(r.index);
-    if (dist !== undefined) lines.push(`Visual Distance: ${dist.toFixed(3)}`);
+    if (r.similarity !== undefined) {
+      lines.push(`Similarity: ${r.similarity.toFixed(1)}%`);
+    } else if (dist !== undefined) {
+      lines.push(`Similarity: ${(100 * (1 - dist / 2)).toFixed(1)}%`);
+    }
   }
 
   return lines.join("\n");

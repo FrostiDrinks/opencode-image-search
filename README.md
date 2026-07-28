@@ -33,6 +33,7 @@ Once installed, the plugin registers an `image_search` tool that agents can invo
 | `engine` | `string?` | `"Yandex"` | Yandex, SauceNAO, Google, TraceMoe, Ascii2D, EHentai, Iqdb, BaiDu, Bing, GoogleLens, Tineye |
 | `limit` | `number?` | `10` | Max results |
 | `blocklist` | `string[]?` | — | Domains to exclude (e.g. `x.com`). Also read from `IMAGE_SEARCH_BLOCKLIST` env var. |
+| `site` | `string?` | — | Only return results from this domain (e.g. `y.com`). Takes precedence over blocklist. |
 
 ### Model compatibility
 
@@ -62,7 +63,7 @@ These are inherited from OpenCode each time the tool is invoked. If required, se
 
 When multiple search results return the same image (identical or visually similar), the plugin keeps only the **highest resolution** thumbnail and attaches it once. The filename records every result it maps to, with runs of consecutive results collapsing into a range (e.g. `result_1-5,7,9-10.jpeg` represents results 1–5, 7, and 9–10).
 
-Deduplication uses a DCT-based perceptual hash. Images within a Hamming distance of 10 bits are grouped together. This catches same-file duplicates, different-compression variants, and same-image-different-resolution returns.
+Deduplication uses a DCT-based perceptual hash. Images within a Hamming distance of 4 bits are grouped together. This catches same-file duplicates, different-compression variants, and same-image-different-resolution returns.
 
 ## Development
 

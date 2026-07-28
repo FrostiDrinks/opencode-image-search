@@ -249,7 +249,7 @@ function filterBySite(results: SearchResult[], site: string): SearchResult[] {
   if (!q) return results;
   const filtered = results.filter((r) => {
     const url = r.url ?? "";
-    if (!url) return false;
+    if (!url) return true;
     try {
       const hostname = new URL(url).hostname.toLowerCase();
       return hostname === q || hostname.endsWith("." + q);

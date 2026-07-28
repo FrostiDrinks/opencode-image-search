@@ -724,6 +724,110 @@ describe("blocklist", () => {
   });
 });
 
+describe("site filter", () => {
+  beforeEach(() => {
+    mockRows = [];
+    searchCache.clear();
+    searchIdCounters.clear();
+    globalThis.__crossImageDecodeState = { presets: [], index: 0 };
+    globalThis.__hashMockState = { presets: [], index: 0 };
+  });
+
+  it("keeps all results when site filter matches all domains", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "A", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
+      { index: 2, title: "B", url: "https://good.com/2", thumbnail: "https://good.com/b.jpg" },
+    ]));
+    mockFetchOk();
+    globalThis.__hashMockState.presets = [
+      { hash: 0n, width: 100, height: 100 },
+      { hash: 0xFFFFFFn, width: 100, height: 100 },
+    ];
+    const result = (await imageSearchTool.execute({ site: "good.com" }, SESSION)) as any;
+    expect(result.output).toContain("Title: A");
+    expect(result.output).toContain("Title: B");
+    expect(result.attachments).toHaveLength(2);
+  });
+
+  it("filters results to only the matching domain", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "Keep", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
+      { index: 2, title: "Drop", url: "https://bad.com/2", thumbnail: "https://bad.com/b.jpg" },
+    ]));
+    mockFetchOk();
+    globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
+
+    const result = (await imageSearchTool.execute({ site: "good.com" }, SESSION)) as any;
+    expect(result.output).toContain("Keep");
+    expect(result.output).not.toContain("Drop");
+    expect(result.attachments).toHaveLength(1);
+    expect(result.attachments[0].filename).toBe("result_1.png");
+  });
+
+  it("matches subdomains of the specified site", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "A", url: "https://sub.good.com/1", thumbnail: "https://sub.good.com/a.jpg" },
+      { index: 2, title: "B", url: "https://other.com/2", thumbnail: "https://other.com/b.jpg" },
+    ]));
+    mockFetchOk();
+    globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
+
+    const result = (await imageSearchTool.execute({ site: "good.com" }, SESSION)) as any;
+    expect(result.output).toContain("Title: A");
+    expect(result.output).not.toContain("Title: B");
+    expect(result.attachments).toHaveLength(1);
+  });
+
+  it("returns message when all results are filtered by site", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "A", url: "https://bad.com/1", thumbnail: "https://bad.com/a.jpg" },
+    ]));
+    mockFetchOk();
+
+    const result = await imageSearchTool.execute({ site: "good.com" }, SESSION);
+    expect(result).toContain("site filter");
+  });
+
+  it("site takes precedence over blocklist", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "A", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
+      { index: 2, title: "B", url: "https://bad.com/2", thumbnail: "https://bad.com/b.jpg" },
+    ]));
+    mockFetchOk();
+    globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
+
+    const result = (await imageSearchTool.execute(
+      { site: "good.com", blocklist: ["good.com"] },
+      SESSION,
+    )) as any;
+    expect(result.output).toContain("Title: A");
+    expect(result.output).not.toContain("Title: B");
+  });
+
+  it("keeps results without a URL", async () => {
+    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
+    mockSpawn(jsonResponse("Yandex", [
+      { index: 1, title: "No URL", thumbnail: "https://good.com/a.jpg" },
+      { index: 2, title: "With URL", url: "https://good.com/2", thumbnail: "https://good.com/b.jpg" },
+    ]));
+    mockFetchOk();
+    globalThis.__hashMockState.presets = [
+      { hash: 0n, width: 100, height: 100 },
+      { hash: 0xFFFFFFn, width: 100, height: 100 },
+    ];
+
+    const result = (await imageSearchTool.execute({ site: "good.com" }, SESSION)) as any;
+    expect(result.output).toContain("No URL");
+    expect(result.output).toContain("With URL");
+    expect(result.attachments).toHaveLength(2);
+  });
+});
+
 describe("Python script JSON contract", () => {
   it("accepts a data URI via stdin and returns valid JSON output", async () => {
     const dataUri = `data:image/png;base64,${MINI_PNG.toString("base64")}`;

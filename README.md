@@ -55,7 +55,7 @@ These are inherited from OpenCode each time the tool is invoked. If required, se
 
 1. Reads OpenCode's SQLite DB (`~/.local/share/opencode/opencode.db`) to find base64-encoded image attachments for the current session, ordered chronologically.
 2. Filters by filename (case-insensitive substring) and/or 1-based index (default: latest image).
-3. Spawns `uv run src/search.py` which uses [`PicImageSearch`](https://github.com/kitUIN/PicImageSearch) to perform the actual reverse image search and return structured JSON.
+3. Spawns `uv run src/search.py` which uses [`PicImageSearch`](https://github.com/kitUIN/PicImageSearch) to perform the actual reverse image search, returning structured JSON.
 4. Returns the text results to the agent, with result thumbnails attached as images for vision-capable models.
 
 ### Thumbnail deduplication
@@ -70,4 +70,4 @@ Deduplication uses a DCT-based perceptual hash. Images within a Hamming distance
 bun test
 ```
 
-Uses `mock.module` to stub `bun:sqlite`, `@opencode-ai/plugin`, and `cross-image`, and replaces `Bun.spawn` with a fake subprocess that returns pre-scripted JSON responses.
+Most tests use `mock.module` to stub `bun:sqlite`, `@opencode-ai/plugin`, and `cross-image`, and replace `Bun.spawn` with a fake subprocess that returns pre-scripted JSON responses. Two additional tests validate the Python script's JSON contract by running `uv run src/search.py` directly with a data URI and a bogus engine name, confirming the script produces valid structured output without crashing.

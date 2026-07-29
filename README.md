@@ -71,4 +71,4 @@ Deduplication uses a DCT-based perceptual hash. Images within a Hamming distance
 bun test
 ```
 
-Most tests use `mock.module` to stub `bun:sqlite`, `@opencode-ai/plugin`, and `cross-image`, and replace `Bun.spawn` with a fake subprocess that returns pre-scripted JSON responses. Two additional tests validate the Python script's JSON contract by running `uv run src/search.py` directly with a data URI and a bogus engine name, confirming the script produces valid structured output without crashing.
+Most tests use `mock.module` to stub `better-sqlite3`, `@opencode-ai/plugin`, `child_process`, and `cross-image`, with a fake subprocess that returns pre-scripted JSON responses. Two additional tests validate the Python script's JSON contract by running `uv run src/search.py` directly with a data URI and a bogus engine name, confirming the script produces valid structured output without crashing.

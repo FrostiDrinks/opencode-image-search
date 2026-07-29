@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import path from "node:path";
+import { Readable } from "node:stream";
 
 declare global {
   var __crossImageDecodeState: {
@@ -44,9 +45,24 @@ mock.module("@opencode-ai/plugin", () => {
 
 let mockRows: { data: string }[] = [];
 
-mock.module("bun:sqlite", () => ({
-  Database: class MockDb {
-    query(_sql: string) {
+// ── child_process mock (delegates to mutable variable) ────────────
+// The factory uses require() inside the mock.module callback, which
+// bypasses the mock system and gives us the real child_process.
+let mockSpawnImpl: ((...args: any[]) => any) | null = null;
+
+mock.module("child_process", () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const realSpawn = require("child_process").spawn;
+  return {
+    spawn: (...args: any[]) =>
+      mockSpawnImpl ? mockSpawnImpl(...args) : realSpawn(...args),
+  };
+});
+
+// ── better-sqlite3 mock ───────────────────────────────────────────
+mock.module("better-sqlite3", () => ({
+  default: class MockDb {
+    prepare(_sql: string) {
       return { all: () => mockRows };
     }
     close() {}
@@ -183,31 +199,22 @@ function jsonResponse(engine: string, results: JsonResult[]) {
   return JSON.stringify({ engine, count: results.length, results });
 }
 
-const originalSpawn = Bun.spawn;
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
-  Bun.spawn = originalSpawn;
+  mockSpawnImpl = null;
   globalThis.fetch = originalFetch;
   globalThis.__crossImageDecodeState.index = 0;
   globalThis.__hashMockState.index = 0;
 });
 
 function mockSpawn(jsonResponseStr: string) {
-  let readDone = false;
-  const read = mock(() => {
-    if (!readDone) {
-      readDone = true;
-      return Promise.resolve({ value: encoder.encode(jsonResponseStr), done: false });
-    }
-    return Promise.resolve({ done: true });
-  });
   const proc = {
     stdin: { write: mock(() => {}), end: mock(() => {}) },
-    stdout: { getReader: () => ({ read }) },
+    stdout: Readable.from([encoder.encode(jsonResponseStr + "\n")]),
     kill: mock(() => {}),
   };
-  Bun.spawn = mock(() => proc);
+  mockSpawnImpl = mock(() => proc);
   return proc;
 }
 
@@ -312,9 +319,10 @@ describe("image_search", () => {
     // biome-ignore lint/suspicious/noExplicitAny: structured result
     const result = (await imageSearchTool.execute({}, SESSION)) as any;
     expect(result.output).toContain("found it");
-    expect(Bun.spawn).toHaveBeenCalledWith(
-      ["uv", "run", expect.stringMatching(/search\.py$/)],
-      expect.objectContaining({ stdin: "pipe", stdout: "pipe" }),
+    expect(mockSpawnImpl).toHaveBeenCalledWith(
+      "uv",
+      ["run", expect.stringMatching(/search\.py$/)],
+      expect.objectContaining({ stdio: ["pipe", "pipe", "inherit"] }),
     );
     // biome-ignore lint/suspicious/noExplicitAny: mock internals
     const calls = (proc.stdin.write as any).mock.calls.map((c: string[]) => c[0]);
@@ -831,10 +839,13 @@ describe("site filter", () => {
 describe("Python script JSON contract", () => {
   it("accepts a data URI via stdin and returns valid JSON output", async () => {
     const dataUri = `data:image/png;base64,${MINI_PNG.toString("base64")}`;
-    const proc = Bun.spawn(["uv", "run", path.join(import.meta.dir, "src/search.py")], {
-      stdin: "pipe",
-      stdout: "pipe",
-    });
+    const { spawn } = await import("child_process");
+    const { fileURLToPath } = await import("url");
+    const proc = spawn(
+      "uv",
+      ["run", path.join(path.dirname(fileURLToPath(import.meta.url)), "src/search.py")],
+      { stdio: ["pipe", "pipe"] },
+    );
     proc.stdin.write(JSON.stringify({
       source: dataUri,
       engine: "Yandex",
@@ -842,13 +853,9 @@ describe("Python script JSON contract", () => {
     }));
     proc.stdin.end();
 
-    const reader = proc.stdout.getReader();
-    const decoder = new TextDecoder();
     let buf = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) buf += decoder.decode(value, { stream: true });
+    for await (const chunk of proc.stdout) {
+      buf += Buffer.from(chunk as Uint8Array).toString();
     }
     proc.kill();
 
@@ -864,10 +871,13 @@ describe("Python script JSON contract", () => {
   });
 
   it("reports error for unknown engine", async () => {
-    const proc = Bun.spawn(["uv", "run", path.join(import.meta.dir, "src/search.py")], {
-      stdin: "pipe",
-      stdout: "pipe",
-    });
+    const { spawn } = await import("child_process");
+    const { fileURLToPath } = await import("url");
+    const proc = spawn(
+      "uv",
+      ["run", path.join(path.dirname(fileURLToPath(import.meta.url)), "src/search.py")],
+      { stdio: ["pipe", "pipe"] },
+    );
     proc.stdin.write(JSON.stringify({
       source: "https://example.com/img.jpg",
       engine: "FakeEngine",
@@ -875,13 +885,9 @@ describe("Python script JSON contract", () => {
     }));
     proc.stdin.end();
 
-    const reader = proc.stdout.getReader();
-    const decoder = new TextDecoder();
     let buf = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) buf += decoder.decode(value, { stream: true });
+    for await (const chunk of proc.stdout) {
+      buf += Buffer.from(chunk as Uint8Array).toString();
     }
     proc.kill();
 

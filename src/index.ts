@@ -1,9 +1,11 @@
 import { tool } from "@opencode-ai/plugin";
 import type { Hooks, PluginModule, ToolAttachment } from "@opencode-ai/plugin";
-import { Database } from "bun:sqlite";
+import { spawn } from "node:child_process";
+import Database from "better-sqlite3";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { perceptualHash, hammingDistance, PHASH_THRESHOLD } from "./hash";
 import { dctSignature, cosineDistance } from "./sig";
 
@@ -345,7 +347,7 @@ const imageSearchTool = tool({
     let rows: { data: string }[];
     try {
       rows = db
-        .query(
+        .prepare(
           `SELECT p.data
            FROM part p
            WHERE p.session_id = $sessionID
@@ -353,7 +355,7 @@ const imageSearchTool = tool({
              AND json_extract(p.data, '$.mime') LIKE 'image/%'
            ORDER BY p.id ASC`,
         )
-        .all({ $sessionID: context.sessionID }) as { data: string }[];
+        .all({ sessionID: context.sessionID }) as { data: string }[];
     } finally {
       db.close();
     }
@@ -381,11 +383,12 @@ const imageSearchTool = tool({
 
     const origFetch = fetchImageAsBuffer(source).catch(() => null);
 
-    const searchPyPath = path.join(import.meta.dir, "search.py");
-    const proc = Bun.spawn(["uv", "run", searchPyPath], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "inherit",
+    const searchPyPath = path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "search.py",
+    );
+    const proc = spawn("uv", ["run", searchPyPath], {
+      stdio: ["pipe", "pipe", "inherit"],
     });
 
     let response: SearchResponse;
@@ -398,13 +401,9 @@ const imageSearchTool = tool({
       proc.stdin.write(input);
       proc.stdin.end();
 
-      const reader = proc.stdout.getReader();
-      const decoder = new TextDecoder();
       let buf = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (value) buf += decoder.decode(value, { stream: true });
+      for await (const chunk of proc.stdout) {
+        buf += Buffer.from(chunk as Uint8Array).toString();
       }
       response = JSON.parse(buf) as SearchResponse;
     } finally {

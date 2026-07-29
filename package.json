@@ -19,6 +19,7 @@
   ],
   "license": "GPL-3.0-only",
   "dependencies": {
+    "better-sqlite3": "^11.7.0",
     "cross-image": "^0.4.3"
   },
   "peerDependencies": {

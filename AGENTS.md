@@ -10,7 +10,7 @@ Add `"opencode-image-search"` to `opencode.json`'s `plugins` array. OpenCode aut
 
 The plugin registers a single tool (`image_search`) via the `tool` hook in `src/index.ts`. Agents invoke this tool to reverse-search images from the current session.
 
-1. Reads OpenCode's SQLite DB (`~/.local/share/opencode/opencode.db`) to find base64-encoded image attachments for the current session, ordered chronologically.
+1. Finds base64-encoded image attachments for the current session using `bun:sqlite` or `context.messages` depending on runtime, ordered chronologically.
 2. Filters by filename (case-insensitive substring) and/or 1-based index (default: latest image).
 3. Spawns `uv run src/search.py` which uses `PicImageSearch` to return structured JSON over stdout.
 4. Returns the text results to the agent. When thumbnails appear in the JSON response, the plugin downloads them, deduplicates near-matches via perceptual hashing (keeping only the highest-resolution copy of each unique image), and attaches the survivors as images for vision-capable models. Merged filenames (e.g. `result_1-5,7,9-10.jpeg`) record which results each thumbnail represents — runs of consecutive results collapse into a range.
@@ -39,8 +39,8 @@ These are inherited from OpenCode each time the tool is invoked. Set them via Op
 
 ## Code conventions
 
-- Main entry `src/index.ts` with helper modules `src/hash.ts` (perceptual hashing via DCT), `src/sig.ts` (DCT signature computation), and `src/sqlite.ts` (cross-runtime SQLite adapter), plus an npm `package.json`.
-- Uses `bun:sqlite` when running in Bun (CLI) and falls back to `better-sqlite3` (optional dependency) in Node.js (desktop). Read-only DB access, clean up resources in `finally` blocks.
+- Main entry `src/index.ts` with helper modules `src/hash.ts` (perceptual hashing via DCT), `src/sig.ts` (DCT signature computation), and `src/images.ts` (cross-runtime image discovery), plus an npm `package.json`.
+- Uses `bun:sqlite` when running in Bun (CLI) and falls back to `context.messages` in Node.js (desktop). Read-only DB access, clean up resources in `finally` blocks.
 
 ## Limitations
 
@@ -48,4 +48,4 @@ Text-only agents can see image filenames (they are exposed in the conversation h
 
 ## Testing
 
-Run all tests with `bun test`. Uses `mock.module` to stub `@opencode-ai/plugin`, `child_process`, `cross-image`, `node:fs`, and `./src/sqlite`, with a fake subprocess that returns pre-scripted JSON responses.
+Run all tests with `bun test`. Uses `mock.module` to stub `@opencode-ai/plugin`, `child_process`, `cross-image`, `node:fs`, and `./src/images`, with a fake subprocess that returns pre-scripted JSON responses.

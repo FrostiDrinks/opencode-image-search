@@ -5,9 +5,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { perceptualHash, hammingDistance, PHASH_THRESHOLD } from "./hash";
-import { dctSignature, cosineDistance } from "./sig";
-import { openDb } from "./sqlite";
+import { perceptualHash, hammingDistance, PHASH_THRESHOLD } from "./hash.ts";
+import { dctSignature, cosineDistance } from "./sig.ts";
+import { findSessionImages } from "./images.ts";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -341,27 +341,20 @@ const imageSearchTool = tool({
       .describe("Only return results from this domain (e.g. y.com). Takes precedence over blocklist."),
   },
   async execute(args, context) {
-    const db = await openDb(path.join(getDbDir(), "opencode.db"));
-
-    let rows: { data: string }[];
-    try {
-      rows = db
-        .prepare(
-          `SELECT p.data
-           FROM part p
-           WHERE p.session_id = $sessionID
-             AND json_extract(p.data, '$.type') = 'file'
-             AND json_extract(p.data, '$.mime') LIKE 'image/%'
-           ORDER BY p.id ASC`,
-        )
-        .all({ sessionID: context.sessionID }) as { data: string }[];
-    } finally {
-      db.close();
+    // ── Find image attachments ────────────────────────────────────
+    // Try bun:sqlite first (Bun CLI), fall back to context.messages
+    // (desktop app) where native addons and WASM aren't available.
+    const parts = await findSessionImages(context);
+    if (!parts) {
+      return (
+        "No image attachments found in this session.\n" +
+        `Session: ${context.sessionID}\n` +
+        "(Could not access session data via bun:sqlite or context.messages)"
+      );
     }
-
-    if (rows.length === 0) return "No image attachments found in this session";
-
-    const parts = rows.map((r) => JSON.parse(r.data)) as FilePart[];
+    if (parts.length === 0) {
+      return "No image attachments found in this session";
+    }
 
     let candidates = parts;
 

@@ -1,6 +1,6 @@
 // cross-image is loaded lazily to avoid module evaluation failures
 // in environments where it's not available (e.g. desktop app bundler).
-let imgModule: Promise<typeof import("cross-image")> | undefined;
+let imgModule: Promise<any> | undefined;
 
 const RESIZE = 32;
 const BLOCK = 8;

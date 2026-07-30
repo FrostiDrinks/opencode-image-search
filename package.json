@@ -21,9 +21,6 @@
   "dependencies": {
     "cross-image": "^0.4.3"
   },
-  "optionalDependencies": {
-    "better-sqlite3": "^11.7.0"
-  },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.15.0"
   },

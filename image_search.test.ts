@@ -59,17 +59,12 @@ mock.module("child_process", () => {
   };
 });
 
-// ── sqlite.ts mock ───────────────────────────────────────────────
-// The sqlite.ts adapter tries bun:sqlite (Bun) or better-sqlite3
-// (Node.js). Since Bun's built-in modules can't be mocked with
-// mock.module, we mock the adapter module itself.
-mock.module("./src/sqlite", () => ({
-  openDb: async () => ({
-    prepare: () => ({
-      all: () => mockRows as Record<string, unknown>[],
-    }),
-    close: () => {},
-  }),
+// ── images.ts mock ───────────────────────────────────────────────
+// findSessionImages tries bun:sqlite first (Bun CLI), falls back to
+// context.messages (desktop app). Mock it to return test data.
+mock.module("./src/images", () => ({
+  findSessionImages: async () =>
+    mockRows.map((r) => JSON.parse(r.data)) as Record<string, unknown>[],
 }));
 
 // --- cross-image mock ---
@@ -275,7 +270,7 @@ describe("image_search", () => {
 
   it("returns message when no images in session", async () => {
     const result = await imageSearchTool.execute({}, SESSION);
-    expect(result).toBe("No image attachments found in this session");
+    expect(result).toContain("No image attachments found in this session");
   });
 
   it("filters by filename — no match", async () => {

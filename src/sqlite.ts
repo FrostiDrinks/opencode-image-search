@@ -1,9 +1,3 @@
-// ── Cross-runtime SQLite adapter ──────────────────────────────────
-//
-// Uses bun:sqlite when running in Bun, falls back to better-sqlite3
-// in Node.js (e.g. opencode-desktop). Both APIs are normalized to a
-// common interface.
-
 interface Db {
   prepare(sql: string): { all(params?: Record<string, unknown>): Record<string, unknown>[] };
   close(): void;
@@ -21,10 +15,16 @@ async function init(): Promise<void> {
       const db = new Database(path, { readonly: true });
       return {
         prepare: (sql: string) => ({
-          all: (params?: Record<string, unknown>) =>
-            (db as unknown as { query(sql: string): { all(p: Record<string, unknown>): Record<string, unknown>[] } })
+          all: (params?: Record<string, unknown>) => {
+            // bun:sqlite expects $ prefix on bind param keys
+            const bunParams: Record<string, unknown> = {};
+            for (const [key, val] of Object.entries(params ?? {})) {
+              bunParams[`$${key}`] = val;
+            }
+            return (db as unknown as { query(sql: string): { all(p: Record<string, unknown>): Record<string, unknown>[] } })
               .query(sql)
-              .all(params ?? {}),
+              .all(bunParams);
+          },
         }),
         close: () => db.close(),
       };

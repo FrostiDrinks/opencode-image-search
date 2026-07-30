@@ -1,8 +1,6 @@
 import { tool } from "@opencode-ai/plugin";
 import type { Hooks, PluginModule, ToolAttachment } from "@opencode-ai/plugin";
 import { spawn } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { perceptualHash, hammingDistance, PHASH_THRESHOLD } from "./hash.ts";
@@ -47,72 +45,6 @@ interface FilePart {
   mime: string;
   url: string;
   filename?: string;
-}
-
-interface CachedResult {
-  title: string;
-  pageUrl: string;
-  thumbnailUrl: string;
-  width: number | null;
-  height: number | null;
-}
-
-interface CachedSearch {
-  searchId: number;
-  sourceImageUrl: string;
-  engine: string;
-  results: CachedResult[];
-  rawResponse: string;
-}
-
-const searchCache = new Map<string, CachedSearch>();
-const searchIdCounters = new Map<string, number>();
-
-function searchCachePath(): string {
-  return path.join(getDbDir(), "image_search_cache.json");
-}
-
-function loadSearchCacheFromDisk(): void {
-  try {
-    const raw = fs.readFileSync(searchCachePath(), "utf-8");
-    const parsed = JSON.parse(raw);
-    for (const [key, val] of Object.entries(parsed)) {
-      searchCache.set(key, val as CachedSearch);
-    }
-    for (const key of searchCache.keys()) {
-      const match = key.match(/::search::(\d+)$/);
-      if (match) {
-        const sid = parseInt(match[1], 10);
-        const sessionId = key.replace(/::search::\d+$/, "");
-        const current = searchIdCounters.get(sessionId) ?? 0;
-        if (sid > current) searchIdCounters.set(sessionId, sid);
-      }
-    }
-  } catch {}
-}
-
-function saveSearchCacheToDisk(): void {
-  try {
-    const obj: Record<string, CachedSearch> = {};
-    for (const [key, val] of searchCache) {
-      obj[key] = val;
-    }
-    const dir = path.dirname(searchCachePath());
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(searchCachePath(), JSON.stringify(obj), "utf-8");
-  } catch {}
-}
-
-loadSearchCacheFromDisk();
-
-function getDbDir(
-  platform = process.platform,
-  appData = process.env.APPDATA,
-  homeDir = os.homedir(),
-): string {
-  return platform === "win32"
-    ? path.join(appData ?? "C:\\Users\\Default\\AppData\\Roaming", "opencode")
-    : path.join(homeDir, ".local/share/opencode");
 }
 
 async function fetchImageAsBuffer(
@@ -411,27 +343,6 @@ const imageSearchTool = tool({
       ? filterBySite(response.results, args.site)
       : filterBlockedResults(response.results, blocklist);
 
-    const cachedResults: CachedResult[] = results.map((r) => ({
-      title: r.title ?? "",
-      pageUrl: stripTrackingParams(r.url ?? ""),
-      thumbnailUrl: r.thumbnail ?? "",
-      width: r.width ?? null,
-      height: r.height ?? null,
-    }));
-
-    if (cachedResults.length > 0) {
-      const searchId = (searchIdCounters.get(context.sessionID) ?? 0) + 1;
-      searchIdCounters.set(context.sessionID, searchId);
-      searchCache.set(`${context.sessionID}::search::${searchId}`, {
-        searchId,
-        sourceImageUrl: source,
-        engine: response.engine,
-        results: cachedResults,
-        rawResponse: JSON.stringify(response),
-      });
-      saveSearchCacheToDisk();
-    }
-
     if (results.length === 0) {
       const hadResults = response.results.length > 0;
       return hadResults
@@ -512,7 +423,7 @@ const imageSearchTool = tool({
   },
 });
 
-export { imageSearchTool, searchCache, searchIdCounters, loadSearchCacheFromDisk, saveSearchCacheToDisk, getDbDir, stripTrackingParams };
+export { imageSearchTool, stripTrackingParams };
 
 export default {
   id: "image_search",

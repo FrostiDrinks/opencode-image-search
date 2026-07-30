@@ -4,10 +4,14 @@ import path from "node:path";
 
 type FilePart = ToolAttachment;
 
-function getDbDir(): string {
-  return process.platform === "win32"
-    ? path.join(process.env.APPDATA ?? "C:\\Users\\Default\\AppData\\Roaming", "opencode")
-    : path.join(os.homedir(), ".local/share/opencode");
+export function getDbDir(
+  platform = process.platform,
+  appData = process.env.APPDATA,
+  homeDir = os.homedir(),
+): string {
+  return platform === "win32"
+    ? path.join(appData ?? "C:\\Users\\Default\\AppData\\Roaming", "opencode")
+    : path.join(homeDir, ".local/share/opencode");
 }
 
 export async function findSessionImages(context: {

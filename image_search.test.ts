@@ -144,17 +144,8 @@ mock.module("./src/hash", () => ({
   PHASH_THRESHOLD: 10,
 }));
 
-mock.module("node:fs", () => {
-  const m: Record<string, unknown> = {};
-  const noop = () => {};
-  m.readFileSync = () => { throw new Error(); };
-  m.writeFileSync = noop;
-  m.mkdirSync = noop;
-  m.default = m;
-  return m;
-});
-
-import { getDbDir, stripTrackingParams, imageSearchTool, searchCache, searchIdCounters } from "./src/index";
+import { getDbDir, stripTrackingParams, imageSearchTool } from "./src/index";
+import { getDbDir } from "./src/images";
 
 // --- Helpers ---
 const encoder = new TextEncoder();
@@ -248,8 +239,6 @@ describe("getDbDir", () => {
 describe("image_search", () => {
   beforeEach(() => {
     mockRows = [];
-    searchCache.clear();
-    searchIdCounters.clear();
     globalThis.__crossImageDecodeState = {
       presets: [],
       index: 0,
@@ -544,27 +533,6 @@ describe("image_search", () => {
     expect(result.attachments[0].filename).toBe("result_1-3.png");
   });
 
-  it("populates search cache with page URLs from results", async () => {
-    mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "R1", url: "https://example.com/page/1", thumbnail: "https://example.com/1.jpg" },
-      { index: 2, title: "R2", url: "https://example.com/page/2", thumbnail: "https://example.com/2.jpg" },
-    ]));
-    mockFetchOk();
-    globalThis.__hashMockState.presets = [
-      { hash: 0n, width: 100, height: 100 },
-      { hash: 0xFFFFFFFFFFFFFFFFn, width: 100, height: 100 },
-    ];
-
-    await imageSearchTool.execute({}, SESSION);
-    const cacheKey = "test-session::search::1";
-    const cached = searchCache.get(cacheKey);
-    expect(cached).toBeDefined();
-    expect(cached!.results).toHaveLength(2);
-    expect(cached!.results[0].pageUrl).toBe("https://example.com/page/1");
-    expect(cached!.results[1].pageUrl).toBe("https://example.com/page/2");
-  });
-
   it("formats a run of 5 consecutive duplicates as a range", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
     mockSpawn(jsonResponse("Yandex", [
@@ -643,8 +611,6 @@ describe("stripTrackingParams", () => {
 describe("blocklist", () => {
   beforeEach(() => {
     mockRows = [];
-    searchCache.clear();
-    searchIdCounters.clear();
     globalThis.__crossImageDecodeState = { presets: [], index: 0 };
     globalThis.__hashMockState = { presets: [], index: 0 };
   });
@@ -733,8 +699,6 @@ describe("blocklist", () => {
 describe("site filter", () => {
   beforeEach(() => {
     mockRows = [];
-    searchCache.clear();
-    searchIdCounters.clear();
     globalThis.__crossImageDecodeState = { presets: [], index: 0 };
     globalThis.__hashMockState = { presets: [], index: 0 };
   });

@@ -1,13 +1,13 @@
 import { tool } from "@opencode-ai/plugin";
 import type { Hooks, PluginModule, ToolAttachment } from "@opencode-ai/plugin";
 import { spawn } from "node:child_process";
-import Database from "better-sqlite3";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { perceptualHash, hammingDistance, PHASH_THRESHOLD } from "./hash";
 import { dctSignature, cosineDistance } from "./sig";
+import { openDb } from "./sqlite";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -303,8 +303,8 @@ function formatResultsText(engine: string, results: SearchResult[], distances: M
 const imageSearchTool = tool({
   description:
     "Retrieve an image from the session and perform a reverse image search. " +
-    "Omit all args to use the most recent image. " +
-    "Supports multiple search engines via PicImageSearch (default: Yandex). " +
+    "Omit all args to use the most recent image with default params. " +
+    "Supports multiple search engines (see below). " +
     "Text-only models: use this tool when asked about an image you cannot view.",
   args: {
     index: tool.schema
@@ -312,13 +312,12 @@ const imageSearchTool = tool({
       .int()
       .positive()
       .optional()
-      .describe("1 = oldest image in the conversation; omit for most recent"),
+      .describe("1 = oldest image in conversation. If filename is set, index filtered list. (default: latest)"),
     filename: tool.schema
       .string()
       .optional()
       .describe(
-        "Filter by filename (case-insensitive substring match). Check the conversation for filenames to target a specific image.",
-      ),
+        "Filter by filename (case-insensitive substring match). (default: latest)"),
     engine: tool.schema
       .string()
       .optional()
@@ -342,7 +341,7 @@ const imageSearchTool = tool({
       .describe("Only return results from this domain (e.g. y.com). Takes precedence over blocklist."),
   },
   async execute(args, context) {
-    const db = new Database(path.join(getDbDir(), "opencode.db"), { readonly: true });
+    const db = await openDb(path.join(getDbDir(), "opencode.db"));
 
     let rows: { data: string }[];
     try {

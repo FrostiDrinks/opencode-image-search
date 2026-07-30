@@ -59,14 +59,17 @@ mock.module("child_process", () => {
   };
 });
 
-// ── better-sqlite3 mock ───────────────────────────────────────────
-mock.module("better-sqlite3", () => ({
-  default: class MockDb {
-    prepare(_sql: string) {
-      return { all: () => mockRows };
-    }
-    close() {}
-  },
+// ── sqlite.ts mock ───────────────────────────────────────────────
+// The sqlite.ts adapter tries bun:sqlite (Bun) or better-sqlite3
+// (Node.js). Since Bun's built-in modules can't be mocked with
+// mock.module, we mock the adapter module itself.
+mock.module("./src/sqlite", () => ({
+  openDb: async () => ({
+    prepare: () => ({
+      all: () => mockRows as Record<string, unknown>[],
+    }),
+    close: () => {},
+  }),
 }));
 
 // --- cross-image mock ---

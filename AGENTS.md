@@ -39,9 +39,8 @@ These are inherited from OpenCode each time the tool is invoked. Set them via Op
 
 ## Code conventions
 
-- Main entry `src/index.ts` with helper modules `src/hash.ts` (perceptual hashing via DCT) and `src/sig.ts` (DCT signature computation), plus an npm `package.json`.
-- Depends on `@opencode-ai/plugin` (provided by the OpenCode runtime), `better-sqlite3` (SQLite), and `cross-image` (image decoding for DCT-based signature computation), plus an npm `package.json`.
-- Read-only DB access, clean up resources in `finally` blocks.
+- Main entry `src/index.ts` with helper modules `src/hash.ts` (perceptual hashing via DCT), `src/sig.ts` (DCT signature computation), and `src/sqlite.ts` (cross-runtime SQLite adapter), plus an npm `package.json`.
+- Uses `bun:sqlite` when running in Bun (CLI) and falls back to `better-sqlite3` (optional dependency) in Node.js (desktop). Read-only DB access, clean up resources in `finally` blocks.
 
 ## Limitations
 
@@ -49,4 +48,4 @@ Text-only agents can see image filenames (they are exposed in the conversation h
 
 ## Testing
 
-Run all tests with `bun test`. Uses `mock.module` to stub `better-sqlite3`, `@opencode-ai/plugin`, `child_process`, and `cross-image`, with a fake subprocess that returns pre-scripted JSON responses.
+Run all tests with `bun test`. Uses `mock.module` to stub `@opencode-ai/plugin`, `child_process`, `cross-image`, `node:fs`, and `./src/sqlite`, with a fake subprocess that returns pre-scripted JSON responses.

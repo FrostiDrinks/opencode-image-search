@@ -1,7 +1,3 @@
-// ── Image discovery ──────────────────────────────────────────────
-// Tries bun:sqlite first (Bun CLI), falls back to context.messages
-// (desktop app) where native addons and WASM aren't available.
-
 import type { ToolAttachment } from "@opencode-ai/plugin";
 import os from "node:os";
 import path from "node:path";
@@ -19,7 +15,6 @@ export async function findSessionImages(context: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   messages?: any[];
 }): Promise<FilePart[] | null> {
-  // Try bun:sqlite
   try {
     const { Database } = await import("bun:sqlite");
     const db = new Database(path.join(getDbDir(), "opencode.db"), {
@@ -41,7 +36,6 @@ export async function findSessionImages(context: {
       db.close();
     }
   } catch {
-    // Fall back to context.messages (desktop app)
     const msgs = context.messages;
     if (!msgs) return null;
 

@@ -48,4 +48,4 @@ Text-only agents can see image filenames (they are exposed in the conversation h
 
 ## Testing
 
-Run all tests with `bun test`. Uses `mock.module` to stub `@opencode-ai/plugin`, `child_process`, `cross-image`, `node:fs`, and `./src/images`, with a fake subprocess that returns pre-scripted JSON responses.
+Run all tests with `bun test`. Uses `mock.module` to stub `@opencode-ai/plugin`, `child_process`, `cross-image`, `./src/images`, and `./src/hash`, with a fake subprocess that returns pre-scripted JSON responses.

@@ -1,4 +1,6 @@
-import { Image } from "cross-image";
+// cross-image is loaded lazily to avoid module evaluation failures
+// in environments where it's not available (e.g. desktop app bundler).
+let imgModule: Promise<any> | undefined;
 
 const RESIZE = 32;
 const BLOCK = 8;
@@ -7,6 +9,8 @@ export async function dctSignature(
   data: Uint8Array,
 ): Promise<{ sig: Float64Array; width: number; height: number } | null> {
   try {
+    if (!imgModule) imgModule = import("cross-image");
+    const { Image } = await imgModule;
     const img = await Image.decode(data);
     const origWidth = img.width;
     const origHeight = img.height;

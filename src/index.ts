@@ -1,13 +1,11 @@
-import { tool } from "@opencode-ai/plugin";
-import type { Hooks, PluginModule, ToolAttachment } from "@opencode-ai/plugin";
-import { Database } from "bun:sqlite";
-import fs from "node:fs";
-import os from "node:os";
+import { spawn } from "node:child_process";
 import path from "node:path";
-import { perceptualHash, hammingDistance, PHASH_THRESHOLD } from "./hash";
-import { dctSignature, cosineDistance } from "./sig";
-
-// ── Types ──────────────────────────────────────────────────────────
+import { fileURLToPath } from "node:url";
+import type { Hooks, PluginModule, ToolAttachment } from "@opencode-ai/plugin";
+import { tool } from "@opencode-ai/plugin";
+import { hammingDistance, PHASH_THRESHOLD, perceptualHash } from "./hash.ts";
+import { findSessionImages } from "./images.ts";
+import { cosineDistance, dctSignature } from "./sig.ts";
 
 interface SearchResult {
   index: number;
@@ -47,72 +45,6 @@ interface FilePart {
   filename?: string;
 }
 
-interface CachedResult {
-  title: string;
-  pageUrl: string;
-  thumbnailUrl: string;
-  width: number | null;
-  height: number | null;
-}
-
-interface CachedSearch {
-  searchId: number;
-  sourceImageUrl: string;
-  engine: string;
-  results: CachedResult[];
-  rawResponse: string;
-}
-
-const searchCache = new Map<string, CachedSearch>();
-const searchIdCounters = new Map<string, number>();
-
-function searchCachePath(): string {
-  return path.join(getDbDir(), "image_search_cache.json");
-}
-
-function loadSearchCacheFromDisk(): void {
-  try {
-    const raw = fs.readFileSync(searchCachePath(), "utf-8");
-    const parsed = JSON.parse(raw);
-    for (const [key, val] of Object.entries(parsed)) {
-      searchCache.set(key, val as CachedSearch);
-    }
-    for (const key of searchCache.keys()) {
-      const match = key.match(/::search::(\d+)$/);
-      if (match) {
-        const sid = parseInt(match[1], 10);
-        const sessionId = key.replace(/::search::\d+$/, "");
-        const current = searchIdCounters.get(sessionId) ?? 0;
-        if (sid > current) searchIdCounters.set(sessionId, sid);
-      }
-    }
-  } catch {}
-}
-
-function saveSearchCacheToDisk(): void {
-  try {
-    const obj: Record<string, CachedSearch> = {};
-    for (const [key, val] of searchCache) {
-      obj[key] = val;
-    }
-    const dir = path.dirname(searchCachePath());
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(searchCachePath(), JSON.stringify(obj), "utf-8");
-  } catch {}
-}
-
-loadSearchCacheFromDisk();
-
-function getDbDir(
-  platform = process.platform,
-  appData = process.env.APPDATA,
-  homeDir = os.homedir(),
-): string {
-  return platform === "win32"
-    ? path.join(appData ?? "C:\\Users\\Default\\AppData\\Roaming", "opencode")
-    : path.join(homeDir, ".local/share/opencode");
-}
-
 async function fetchImageAsBuffer(
   url: string,
   signal?: AbortSignal,
@@ -128,9 +60,19 @@ function stripTrackingParams(url: string): string {
   try {
     const parsed = new URL(url);
     const trackingParams = [
-      "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-      "fbclid", "gclid", "yclid", "dclid", "msclkid",
-      "_openstat", "mc_cid", "mc_eid",
+      "utm_source",
+      "utm_medium",
+      "utm_campaign",
+      "utm_term",
+      "utm_content",
+      "fbclid",
+      "gclid",
+      "yclid",
+      "dclid",
+      "msclkid",
+      "_openstat",
+      "mc_cid",
+      "mc_eid",
     ];
     for (const param of trackingParams) {
       parsed.searchParams.delete(param);
@@ -229,9 +171,9 @@ function isBlocked(url: string, blocklist: Set<string>): boolean {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
     for (const domain of blocklist) {
-      if (hostname === domain || hostname.endsWith("." + domain)) return true;
+      if (hostname === domain || hostname.endsWith(`.${domain}`)) return true;
     }
-  } catch {}
+  } catch {} // malformed URL → not blocked
   return false;
 }
 
@@ -252,7 +194,7 @@ function filterBySite(results: SearchResult[], site: string): SearchResult[] {
     if (!url) return true;
     try {
       const hostname = new URL(url).hostname.toLowerCase();
-      return hostname === q || hostname.endsWith("." + q);
+      return hostname === q || hostname.endsWith(`.${q}`);
     } catch {
       return false;
     }
@@ -260,7 +202,11 @@ function filterBySite(results: SearchResult[], site: string): SearchResult[] {
   return filtered.map((r, i) => ({ ...r, index: i + 1 }));
 }
 
-function formatResultsText(engine: string, results: SearchResult[], distances: Map<number, number>): string {
+function formatResultsText(
+  engine: string,
+  results: SearchResult[],
+  distances: Map<number, number>,
+): string {
   if (results.length === 0) return `Search Engine: ${engine}\nNo results found`;
 
   const lines: string[] = [
@@ -273,7 +219,9 @@ function formatResultsText(engine: string, results: SearchResult[], distances: M
     if (r.title) lines.push(`Title: ${r.title}`);
     if (r.episode !== undefined) lines.push(`Episode: ${r.episode}`);
     if (r.content !== undefined) {
-      const skip = r.title && (r.content === r.title || r.title.includes(r.content) || r.content.includes(r.title));
+      const skip =
+        r.title &&
+        (r.content === r.title || r.title.includes(r.content) || r.content.includes(r.title));
       if (!skip) lines.push(`Content: ${r.content}`);
     }
     if (r.author) lines.push(`Author: ${r.author}`);
@@ -301,8 +249,8 @@ function formatResultsText(engine: string, results: SearchResult[], distances: M
 const imageSearchTool = tool({
   description:
     "Retrieve an image from the session and perform a reverse image search. " +
-    "Omit all args to use the most recent image. " +
-    "Supports multiple search engines via PicImageSearch (default: Yandex). " +
+    "Omit all args to use the most recent image with default params. " +
+    "Supports multiple search engines (default: yandex). " +
     "Text-only models: use this tool when asked about an image you cannot view.",
   args: {
     index: tool.schema
@@ -310,13 +258,13 @@ const imageSearchTool = tool({
       .int()
       .positive()
       .optional()
-      .describe("1 = oldest image in the conversation; omit for most recent"),
+      .describe(
+        "1 = oldest image in conversation. If filename is set, index the filtered list. (default: latest)",
+      ),
     filename: tool.schema
       .string()
       .optional()
-      .describe(
-        "Filter by filename (case-insensitive substring match). Check the conversation for filenames to target a specific image.",
-      ),
+      .describe("Filter by filename (case-insensitive substring match). (default: latest)"),
     engine: tool.schema
       .string()
       .optional()
@@ -333,34 +281,28 @@ const imageSearchTool = tool({
     blocklist: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Domains to exclude from results (e.g. x.com). Also read from IMAGE_SEARCH_BLOCKLIST env var (comma-separated)."),
+      .describe(
+        "Domains to exclude from results (e.g. x.com). Also read from IMAGE_SEARCH_BLOCKLIST env var (comma-separated).",
+      ),
     site: tool.schema
       .string()
       .optional()
-      .describe("Only return results from this domain (e.g. y.com). Takes precedence over blocklist."),
+      .describe(
+        "Only return results from this domain (e.g. y.com). Takes precedence over blocklist.",
+      ),
   },
   async execute(args, context) {
-    const db = new Database(path.join(getDbDir(), "opencode.db"), { readonly: true });
-
-    let rows: { data: string }[];
-    try {
-      rows = db
-        .query(
-          `SELECT p.data
-           FROM part p
-           WHERE p.session_id = $sessionID
-             AND json_extract(p.data, '$.type') = 'file'
-             AND json_extract(p.data, '$.mime') LIKE 'image/%'
-           ORDER BY p.id ASC`,
-        )
-        .all({ $sessionID: context.sessionID }) as { data: string }[];
-    } finally {
-      db.close();
+    const parts = await findSessionImages(context);
+    if (!parts) {
+      return (
+        "No image attachments found in this session.\n" +
+        `Session: ${context.sessionID}\n` +
+        "(Could not access session data via bun:sqlite or context.messages)"
+      );
     }
-
-    if (rows.length === 0) return "No image attachments found in this session";
-
-    const parts = rows.map((r) => JSON.parse(r.data)) as FilePart[];
+    if (parts.length === 0) {
+      return "No image attachments found in this session";
+    }
 
     let candidates = parts;
 
@@ -381,11 +323,9 @@ const imageSearchTool = tool({
 
     const origFetch = fetchImageAsBuffer(source).catch(() => null);
 
-    const searchPyPath = path.join(import.meta.dir, "search.py");
-    const proc = Bun.spawn(["uv", "run", searchPyPath], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "inherit",
+    const searchPyPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "search.py");
+    const proc = spawn("uv", ["run", searchPyPath], {
+      stdio: ["pipe", "pipe", "inherit"],
     });
 
     let response: SearchResponse;
@@ -398,13 +338,9 @@ const imageSearchTool = tool({
       proc.stdin.write(input);
       proc.stdin.end();
 
-      const reader = proc.stdout.getReader();
-      const decoder = new TextDecoder();
       let buf = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (value) buf += decoder.decode(value, { stream: true });
+      for await (const chunk of proc.stdout) {
+        buf += Buffer.from(chunk as Uint8Array).toString();
       }
       response = JSON.parse(buf) as SearchResponse;
     } finally {
@@ -420,27 +356,6 @@ const imageSearchTool = tool({
       ? filterBySite(response.results, args.site)
       : filterBlockedResults(response.results, blocklist);
 
-    const cachedResults: CachedResult[] = results.map((r) => ({
-      title: r.title ?? "",
-      pageUrl: stripTrackingParams(r.url ?? ""),
-      thumbnailUrl: r.thumbnail ?? "",
-      width: r.width ?? null,
-      height: r.height ?? null,
-    }));
-
-    if (cachedResults.length > 0) {
-      const searchId = (searchIdCounters.get(context.sessionID) ?? 0) + 1;
-      searchIdCounters.set(context.sessionID, searchId);
-      searchCache.set(`${context.sessionID}::search::${searchId}`, {
-        searchId,
-        sourceImageUrl: source,
-        engine: response.engine,
-        results: cachedResults,
-        rawResponse: JSON.stringify(response),
-      });
-      saveSearchCacheToDisk();
-    }
-
     if (results.length === 0) {
       const hadResults = response.results.length > 0;
       return hadResults
@@ -450,7 +365,10 @@ const imageSearchTool = tool({
 
     const limit = args.limit ?? 10;
     const bestImageUrl = (r: SearchResult) => r.image_url || r.thumbnail;
-    const imageUrls = results.map((r) => bestImageUrl(r)).filter(Boolean).slice(0, limit);
+    const imageUrls = results
+      .map((r) => bestImageUrl(r))
+      .filter(Boolean)
+      .slice(0, limit);
 
     if (imageUrls.length === 0) {
       return formatResultsText(response.engine, results, new Map());
@@ -475,9 +393,7 @@ const imageSearchTool = tool({
             distances.set(r.index, cosineDistance(origSig.sig, thumbSig.sig));
           }
         }
-      } catch {
-        // skip thumbnails that fail to download
-      }
+      } catch {} // skip thumbnails that fail to download
     }
 
     if (downloads.length === 0) {
@@ -521,7 +437,7 @@ const imageSearchTool = tool({
   },
 });
 
-export { imageSearchTool, searchCache, searchIdCounters, loadSearchCacheFromDisk, saveSearchCacheToDisk, getDbDir, stripTrackingParams };
+export { imageSearchTool, stripTrackingParams };
 
 export default {
   id: "image_search",

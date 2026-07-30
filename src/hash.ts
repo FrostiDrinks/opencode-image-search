@@ -1,4 +1,4 @@
-import { dctSignature } from "./sig";
+import { dctSignature } from "./sig.ts";
 
 const BLOCK = 5;
 

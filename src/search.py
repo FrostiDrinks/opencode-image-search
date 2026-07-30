@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+from typing import Any
 from http.cookies import SimpleCookie
 
 from PicImageSearch.model.base import BaseSearchItem
@@ -237,7 +238,7 @@ def _parse_size(entry: dict) -> None:
                 pass
 
 
-def _serialize(val):
+def _serialize(val: Any) -> Any:
     if isinstance(val, (list, tuple)):
         return [_serialize(v) for v in val]
     if isinstance(val, dict):

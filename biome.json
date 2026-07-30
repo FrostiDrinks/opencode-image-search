@@ -3,7 +3,10 @@
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,
-    "rules": { "preset": "recommended" }
+    "rules": {
+      "preset": "recommended",
+      "suspicious": { "noExplicitAny": "off" }
+    }
   },
   "formatter": {
     "enabled": true,

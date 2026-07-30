@@ -1,13 +1,11 @@
-import { tool } from "@opencode-ai/plugin";
-import type { Hooks, PluginModule, ToolAttachment } from "@opencode-ai/plugin";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { perceptualHash, hammingDistance, PHASH_THRESHOLD } from "./hash.ts";
-import { dctSignature, cosineDistance } from "./sig.ts";
+import type { Hooks, PluginModule, ToolAttachment } from "@opencode-ai/plugin";
+import { tool } from "@opencode-ai/plugin";
+import { hammingDistance, PHASH_THRESHOLD, perceptualHash } from "./hash.ts";
 import { findSessionImages } from "./images.ts";
-
-// ── Types ──────────────────────────────────────────────────────────
+import { cosineDistance, dctSignature } from "./sig.ts";
 
 interface SearchResult {
   index: number;
@@ -62,9 +60,19 @@ function stripTrackingParams(url: string): string {
   try {
     const parsed = new URL(url);
     const trackingParams = [
-      "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-      "fbclid", "gclid", "yclid", "dclid", "msclkid",
-      "_openstat", "mc_cid", "mc_eid",
+      "utm_source",
+      "utm_medium",
+      "utm_campaign",
+      "utm_term",
+      "utm_content",
+      "fbclid",
+      "gclid",
+      "yclid",
+      "dclid",
+      "msclkid",
+      "_openstat",
+      "mc_cid",
+      "mc_eid",
     ];
     for (const param of trackingParams) {
       parsed.searchParams.delete(param);
@@ -163,9 +171,9 @@ function isBlocked(url: string, blocklist: Set<string>): boolean {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
     for (const domain of blocklist) {
-      if (hostname === domain || hostname.endsWith("." + domain)) return true;
+      if (hostname === domain || hostname.endsWith(`.${domain}`)) return true;
     }
-  } catch {}
+  } catch {} // malformed URL → not blocked
   return false;
 }
 
@@ -186,7 +194,7 @@ function filterBySite(results: SearchResult[], site: string): SearchResult[] {
     if (!url) return true;
     try {
       const hostname = new URL(url).hostname.toLowerCase();
-      return hostname === q || hostname.endsWith("." + q);
+      return hostname === q || hostname.endsWith(`.${q}`);
     } catch {
       return false;
     }
@@ -194,7 +202,11 @@ function filterBySite(results: SearchResult[], site: string): SearchResult[] {
   return filtered.map((r, i) => ({ ...r, index: i + 1 }));
 }
 
-function formatResultsText(engine: string, results: SearchResult[], distances: Map<number, number>): string {
+function formatResultsText(
+  engine: string,
+  results: SearchResult[],
+  distances: Map<number, number>,
+): string {
   if (results.length === 0) return `Search Engine: ${engine}\nNo results found`;
 
   const lines: string[] = [
@@ -207,7 +219,9 @@ function formatResultsText(engine: string, results: SearchResult[], distances: M
     if (r.title) lines.push(`Title: ${r.title}`);
     if (r.episode !== undefined) lines.push(`Episode: ${r.episode}`);
     if (r.content !== undefined) {
-      const skip = r.title && (r.content === r.title || r.title.includes(r.content) || r.content.includes(r.title));
+      const skip =
+        r.title &&
+        (r.content === r.title || r.title.includes(r.content) || r.content.includes(r.title));
       if (!skip) lines.push(`Content: ${r.content}`);
     }
     if (r.author) lines.push(`Author: ${r.author}`);
@@ -244,12 +258,13 @@ const imageSearchTool = tool({
       .int()
       .positive()
       .optional()
-      .describe("1 = oldest image in conversation. If filename is set, index filtered list. (default: latest)"),
+      .describe(
+        "1 = oldest image in conversation. If filename is set, index filtered list. (default: latest)",
+      ),
     filename: tool.schema
       .string()
       .optional()
-      .describe(
-        "Filter by filename (case-insensitive substring match). (default: latest)"),
+      .describe("Filter by filename (case-insensitive substring match). (default: latest)"),
     engine: tool.schema
       .string()
       .optional()
@@ -266,14 +281,17 @@ const imageSearchTool = tool({
     blocklist: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Domains to exclude from results (e.g. x.com). Also read from IMAGE_SEARCH_BLOCKLIST env var (comma-separated)."),
+      .describe(
+        "Domains to exclude from results (e.g. x.com). Also read from IMAGE_SEARCH_BLOCKLIST env var (comma-separated).",
+      ),
     site: tool.schema
       .string()
       .optional()
-      .describe("Only return results from this domain (e.g. y.com). Takes precedence over blocklist."),
+      .describe(
+        "Only return results from this domain (e.g. y.com). Takes precedence over blocklist.",
+      ),
   },
   async execute(args, context) {
-    // ── Find image attachments ────────────────────────────────────
     // Try bun:sqlite first (Bun CLI), fall back to context.messages
     // (desktop app) where native addons and WASM aren't available.
     const parts = await findSessionImages(context);
@@ -307,10 +325,7 @@ const imageSearchTool = tool({
 
     const origFetch = fetchImageAsBuffer(source).catch(() => null);
 
-    const searchPyPath = path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "search.py",
-    );
+    const searchPyPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "search.py");
     const proc = spawn("uv", ["run", searchPyPath], {
       stdio: ["pipe", "pipe", "inherit"],
     });
@@ -352,7 +367,10 @@ const imageSearchTool = tool({
 
     const limit = args.limit ?? 10;
     const bestImageUrl = (r: SearchResult) => r.image_url || r.thumbnail;
-    const imageUrls = results.map((r) => bestImageUrl(r)).filter(Boolean).slice(0, limit);
+    const imageUrls = results
+      .map((r) => bestImageUrl(r))
+      .filter(Boolean)
+      .slice(0, limit);
 
     if (imageUrls.length === 0) {
       return formatResultsText(response.engine, results, new Map());
@@ -377,9 +395,7 @@ const imageSearchTool = tool({
             distances.set(r.index, cosineDistance(origSig.sig, thumbSig.sig));
           }
         }
-      } catch {
-        // skip thumbnails that fail to download
-      }
+      } catch {} // skip thumbnails that fail to download
     }
 
     if (downloads.length === 0) {

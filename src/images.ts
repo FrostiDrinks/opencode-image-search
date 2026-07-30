@@ -1,6 +1,6 @@
-import type { ToolAttachment } from "@opencode-ai/plugin";
 import os from "node:os";
 import path from "node:path";
+import type { ToolAttachment } from "@opencode-ai/plugin";
 
 type FilePart = ToolAttachment;
 
@@ -16,7 +16,6 @@ export function getDbDir(
 
 export async function findSessionImages(context: {
   sessionID: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   messages?: any[];
 }): Promise<FilePart[] | null> {
   try {

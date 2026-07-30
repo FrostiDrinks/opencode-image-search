@@ -13,8 +13,6 @@ declare global {
   };
 }
 
-// --- Mock schema chain helpers ---
-// biome-ignore lint/suspicious/noExplicitAny: mock chain helper
 function desc(): any {
   return {};
 }
@@ -32,7 +30,6 @@ function int() {
 }
 
 mock.module("@opencode-ai/plugin", () => {
-  // biome-ignore lint/suspicious/noExplicitAny: mock
   const tool = Object.assign((cfg: any) => cfg, {
     schema: {
       number: () => ({ int }),
@@ -45,21 +42,17 @@ mock.module("@opencode-ai/plugin", () => {
 
 let mockRows: { data: string }[] = [];
 
-// ── child_process mock (delegates to mutable variable) ────────────
 // The factory uses require() inside the mock.module callback, which
 // bypasses the mock system and gives us the real child_process.
 let mockSpawnImpl: ((...args: any[]) => any) | null = null;
 
 mock.module("child_process", () => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const realSpawn = require("child_process").spawn;
+  const realSpawn = require("node:child_process").spawn;
   return {
-    spawn: (...args: any[]) =>
-      mockSpawnImpl ? mockSpawnImpl(...args) : realSpawn(...args),
+    spawn: (...args: any[]) => (mockSpawnImpl ? mockSpawnImpl(...args) : realSpawn(...args)),
   };
 });
 
-// ── images.ts mock ───────────────────────────────────────────────
 // findSessionImages tries bun:sqlite first (Bun CLI), falls back to
 // context.messages (desktop app). Mock it to return test data.
 mock.module("./src/images", () => ({
@@ -67,7 +60,6 @@ mock.module("./src/images", () => ({
     mockRows.map((r) => JSON.parse(r.data)) as Record<string, unknown>[],
 }));
 
-// --- cross-image mock ---
 globalThis.__crossImageDecodeState = {
   presets: [] as { hash: bigint; width: number; height: number }[],
   index: 0,
@@ -78,17 +70,14 @@ function makePixelData(hash: bigint): Uint8Array {
   const H = 32;
   const pixelCount = W * H;
   const data = new Uint8Array(pixelCount * 4);
-  const seed = Number(hash & 0xFFn);
+  const seed = Number(hash & 0xffn);
   const pattern = (seed >> 2) & 3;
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const idx = (y * W + x) * 4;
       const base = x * 3 + y * 7;
       const mod =
-        pattern === 0 ? x * 11 :
-        pattern === 1 ? y * 13 :
-        pattern === 2 ? x * y :
-        x * 11 + y * 13;
+        pattern === 0 ? x * 11 : pattern === 1 ? y * 13 : pattern === 2 ? x * y : x * 11 + y * 13;
       const value = (seed + base + mod) % 256;
       data[idx] = value;
       data[idx + 1] = value;
@@ -144,10 +133,9 @@ mock.module("./src/hash", () => ({
   PHASH_THRESHOLD: 10,
 }));
 
-import { getDbDir, stripTrackingParams, imageSearchTool } from "./src/index";
 import { getDbDir } from "./src/images";
+import { imageSearchTool, stripTrackingParams } from "./src/index";
 
-// --- Helpers ---
 const encoder = new TextEncoder();
 const SESSION = { sessionID: "test-session" };
 
@@ -200,14 +188,12 @@ afterEach(() => {
 function mockSpawn(jsonResponseStr: string) {
   const proc = {
     stdin: { write: mock(() => {}), end: mock(() => {}) },
-    stdout: Readable.from([encoder.encode(jsonResponseStr + "\n")]),
+    stdout: Readable.from([encoder.encode(`${jsonResponseStr}\n`)]),
     kill: mock(() => {}),
   };
   mockSpawnImpl = mock(() => proc);
   return proc;
 }
-
-// --- Tests ---
 
 describe("getDbDir", () => {
   it("uses .local/share/opencode on non-Windows", () => {
@@ -270,10 +256,18 @@ describe("image_search", () => {
 
   it("filters by filename — case insensitive", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "Cat.PNG"));
-    mockSpawn(jsonResponse("Yandex", [{ index: 1, title: "cat result", url: "https://ex.com", thumbnail: "https://ex.com/thumb.jpg" }]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        {
+          index: 1,
+          title: "cat result",
+          url: "https://ex.com",
+          thumbnail: "https://ex.com/thumb.jpg",
+        },
+      ]),
+    );
     globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
     mockFetchOk();
-    // biome-ignore lint/suspicious/noExplicitAny: structured result
     const result = (await imageSearchTool.execute({ filename: "cat" }, SESSION)) as any;
     expect(result.output).toContain("cat result");
   });
@@ -300,10 +294,18 @@ describe("image_search", () => {
 
   it("performs successful search with default engine", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    const proc = mockSpawn(jsonResponse("Yandex", [{ index: 1, title: "found it", url: "https://ex.com", thumbnail: "https://ex.com/thumb.jpg" }]));
+    const proc = mockSpawn(
+      jsonResponse("Yandex", [
+        {
+          index: 1,
+          title: "found it",
+          url: "https://ex.com",
+          thumbnail: "https://ex.com/thumb.jpg",
+        },
+      ]),
+    );
     globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
     mockFetchOk();
-    // biome-ignore lint/suspicious/noExplicitAny: structured result
     const result = (await imageSearchTool.execute({}, SESSION)) as any;
     expect(result.output).toContain("found it");
     expect(mockSpawnImpl).toHaveBeenCalledWith(
@@ -311,7 +313,6 @@ describe("image_search", () => {
       ["run", expect.stringMatching(/search\.py$/)],
       expect.objectContaining({ stdio: ["pipe", "pipe", "inherit"] }),
     );
-    // biome-ignore lint/suspicious/noExplicitAny: mock internals
     const calls = (proc.stdin.write as any).mock.calls.map((c: string[]) => c[0]);
     expect(calls.some((s: string) => s.includes("Yandex"))).toBeTrue();
   });
@@ -320,7 +321,6 @@ describe("image_search", () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
     const proc = mockSpawn(jsonResponse("SauceNAO", []));
     await imageSearchTool.execute({ engine: "SauceNAO", limit: 5 }, SESSION);
-    // biome-ignore lint/suspicious/noExplicitAny: mock internals
     const calls = (proc.stdin.write as any).mock.calls.map((c: string[]) => c[0]);
     const call = calls.find((s: string) => s.includes("SauceNAO"));
     expect(call).toContain("SauceNAO");
@@ -332,16 +332,19 @@ describe("image_search", () => {
       imageRecord("data:image/png;base64,first", "first.png"),
       imageRecord("data:image/png;base64,second", "second.png"),
     );
-    const proc = mockSpawn(jsonResponse("Yandex", [{ index: 1, title: "second", url: "https://ex.com", thumbnail: "" }]));
+    const proc = mockSpawn(
+      jsonResponse("Yandex", [{ index: 1, title: "second", url: "https://ex.com", thumbnail: "" }]),
+    );
     await imageSearchTool.execute({ index: 2 }, SESSION);
-    // biome-ignore lint/suspicious/noExplicitAny: mock internals
     const calls = (proc.stdin.write as any).mock.calls.map((c: string[]) => c[0]);
     expect(calls.find((s: string) => s.includes("second"))).toContain("second");
   });
 
   it("kills child process in finally block", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    const proc = mockSpawn(jsonResponse("Yandex", [{ index: 1, title: "ok", url: "https://ex.com", thumbnail: "" }]));
+    const proc = mockSpawn(
+      jsonResponse("Yandex", [{ index: 1, title: "ok", url: "https://ex.com", thumbnail: "" }]),
+    );
     await imageSearchTool.execute({}, SESSION);
     expect(proc.kill).toHaveBeenCalled();
   });
@@ -365,17 +368,28 @@ describe("image_search", () => {
 
   it("returns structured result with image attachments for thumbnail results", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "Result A", url: "https://example.com/a", thumbnail: "https://example.com/a.jpg" },
-      { index: 2, title: "Result B", url: "https://example.com/b", thumbnail: "https://example.com/b.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        {
+          index: 1,
+          title: "Result A",
+          url: "https://example.com/a",
+          thumbnail: "https://example.com/a.jpg",
+        },
+        {
+          index: 2,
+          title: "Result B",
+          url: "https://example.com/b",
+          thumbnail: "https://example.com/b.jpg",
+        },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
       { hash: 0xffffffffffffffffn, width: 100, height: 100 },
     ];
 
-    // biome-ignore lint/suspicious/noExplicitAny: structured result access
     const result = (await imageSearchTool.execute({}, SESSION)) as any;
     expect(result.output).toContain("Search Engine: Yandex");
     expect(result.output).toContain("Result A");
@@ -391,15 +405,16 @@ describe("image_search", () => {
 
   it("caps attachments to the requested limit", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "R1", url: "https://ex.com/1", thumbnail: "https://example.com/1.jpg" },
-      { index: 2, title: "R2", url: "https://ex.com/2", thumbnail: "https://example.com/2.jpg" },
-      { index: 3, title: "R3", url: "https://ex.com/3", thumbnail: "https://example.com/3.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "R1", url: "https://ex.com/1", thumbnail: "https://example.com/1.jpg" },
+        { index: 2, title: "R2", url: "https://ex.com/2", thumbnail: "https://example.com/2.jpg" },
+        { index: 3, title: "R3", url: "https://ex.com/3", thumbnail: "https://example.com/3.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [{ hash: 111n, width: 100, height: 100 }];
 
-    // biome-ignore lint/suspicious/noExplicitAny: structured result access
     const result = (await imageSearchTool.execute({ limit: 1 }, SESSION)) as any;
     expect(result.attachments).toHaveLength(1);
     expect(result.attachments[0].filename).toBe("result_1.png");
@@ -410,10 +425,22 @@ describe("image_search", () => {
 
   it("skips thumbnails that fail to download", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "Good", url: "https://ex.com/1", thumbnail: "https://example.com/good.jpg" },
-      { index: 2, title: "Bad", url: "https://ex.com/2", thumbnail: "https://example.com/bad.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        {
+          index: 1,
+          title: "Good",
+          url: "https://ex.com/1",
+          thumbnail: "https://example.com/good.jpg",
+        },
+        {
+          index: 2,
+          title: "Bad",
+          url: "https://ex.com/2",
+          thumbnail: "https://example.com/bad.jpg",
+        },
+      ]),
+    );
     let callCount = 0;
     globalThis.fetch = mock(() => {
       callCount++;
@@ -425,7 +452,6 @@ describe("image_search", () => {
       );
     }) as unknown as typeof globalThis.fetch;
 
-    // biome-ignore lint/suspicious/noExplicitAny: structured result access
     const result = (await imageSearchTool.execute({}, SESSION)) as any;
     expect(result.output).toContain("Similarity:");
     expect(result.attachments).toHaveLength(1);
@@ -434,17 +460,18 @@ describe("image_search", () => {
 
   it("deduplicates identical thumbnails into one attachment", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
-      { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
+        { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 123n, width: 100, height: 100 },
       { hash: 123n, width: 100, height: 100 },
     ];
 
-    // biome-ignore lint/suspicious/noExplicitAny: structured result access
     const result = (await imageSearchTool.execute({}, SESSION)) as any;
     expect(result.attachments).toHaveLength(1);
     expect(result.attachments[0].filename).toBe("result_1-2.png");
@@ -452,17 +479,18 @@ describe("image_search", () => {
 
   it("keeps separate attachments for different thumbnails", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
-      { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
+        { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
       { hash: 0xffffffffffffffffn, width: 100, height: 100 },
     ];
 
-    // biome-ignore lint/suspicious/noExplicitAny: structured result access
     const result = (await imageSearchTool.execute({}, SESSION)) as any;
     expect(result.attachments).toHaveLength(2);
     expect(result.attachments[0].filename).toBe("result_1.png");
@@ -471,11 +499,13 @@ describe("image_search", () => {
 
   it("groups non-consecutive duplicates correctly", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
-      { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
-      { index: 3, title: "C", url: "https://ex.com/c", thumbnail: "https://example.com/c.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
+        { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
+        { index: 3, title: "C", url: "https://ex.com/c", thumbnail: "https://example.com/c.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
@@ -483,7 +513,6 @@ describe("image_search", () => {
       { hash: 0n, width: 100, height: 100 },
     ];
 
-    // biome-ignore lint/suspicious/noExplicitAny: structured result access
     const result = (await imageSearchTool.execute({}, SESSION)) as any;
     expect(result.attachments).toHaveLength(2);
     expect(result.attachments[0].filename).toBe("result_1,3.png");
@@ -492,17 +521,28 @@ describe("image_search", () => {
 
   it("picks highest resolution thumbnail from each duplicate group", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "Small", url: "https://ex.com/small", thumbnail: "https://example.com/small.jpg" },
-      { index: 2, title: "Large", url: "https://ex.com/large", thumbnail: "https://example.com/large.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        {
+          index: 1,
+          title: "Small",
+          url: "https://ex.com/small",
+          thumbnail: "https://example.com/small.jpg",
+        },
+        {
+          index: 2,
+          title: "Large",
+          url: "https://ex.com/large",
+          thumbnail: "https://example.com/large.jpg",
+        },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 456n, width: 50, height: 50 },
       { hash: 456n, width: 200, height: 200 },
     ];
 
-    // biome-ignore lint/suspicious/noExplicitAny: structured result access
     const result = (await imageSearchTool.execute({}, SESSION)) as any;
     expect(result.attachments).toHaveLength(1);
 
@@ -515,11 +555,13 @@ describe("image_search", () => {
 
   it("groups transitively: A↔B and B↔C but not A↔C are still merged via B", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
-      { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
-      { index: 3, title: "C", url: "https://ex.com/c", thumbnail: "https://example.com/c.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
+        { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
+        { index: 3, title: "C", url: "https://ex.com/c", thumbnail: "https://example.com/c.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 50, height: 50 },
@@ -527,7 +569,6 @@ describe("image_search", () => {
       { hash: 1047552n, width: 100, height: 100 },
     ];
 
-    // biome-ignore lint/suspicious/noExplicitAny: structured result access
     const result = (await imageSearchTool.execute({}, SESSION)) as any;
     expect(result.attachments).toHaveLength(1);
     expect(result.attachments[0].filename).toBe("result_1-3.png");
@@ -535,13 +576,15 @@ describe("image_search", () => {
 
   it("formats a run of 5 consecutive duplicates as a range", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
-      { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
-      { index: 3, title: "C", url: "https://ex.com/c", thumbnail: "https://example.com/c.jpg" },
-      { index: 4, title: "D", url: "https://ex.com/d", thumbnail: "https://example.com/d.jpg" },
-      { index: 5, title: "E", url: "https://ex.com/e", thumbnail: "https://example.com/e.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "A", url: "https://ex.com/a", thumbnail: "https://example.com/a.jpg" },
+        { index: 2, title: "B", url: "https://ex.com/b", thumbnail: "https://example.com/b.jpg" },
+        { index: 3, title: "C", url: "https://ex.com/c", thumbnail: "https://example.com/c.jpg" },
+        { index: 4, title: "D", url: "https://ex.com/d", thumbnail: "https://example.com/d.jpg" },
+        { index: 5, title: "E", url: "https://ex.com/e", thumbnail: "https://example.com/e.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 999n, width: 100, height: 100 },
@@ -551,7 +594,6 @@ describe("image_search", () => {
       { hash: 999n, width: 100, height: 100 },
     ];
 
-    // biome-ignore lint/suspicious/noExplicitAny: structured result access
     const result = (await imageSearchTool.execute({}, SESSION)) as any;
     expect(result.attachments).toHaveLength(1);
     expect(result.attachments[0].filename).toBe("result_1-5.png");
@@ -566,7 +608,8 @@ describe("stripTrackingParams", () => {
   });
 
   it("removes fbclid, gclid, yclid, dclid, msclkid", () => {
-    const url = "https://example.com/page?fbclid=abc&gclid=def&yclid=ghi&dclid=jkl&msclkid=mno&keep=stay";
+    const url =
+      "https://example.com/page?fbclid=abc&gclid=def&yclid=ghi&dclid=jkl&msclkid=mno&keep=stay";
     const result = stripTrackingParams(url);
     expect(result).toBe("https://example.com/page?keep=stay");
   });
@@ -617,16 +660,21 @@ describe("blocklist", () => {
 
   it("keeps all results when blocklist has no matches", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "A", url: "https://ex.com/1", thumbnail: "https://ex.com/a.jpg" },
-      { index: 2, title: "B", url: "https://ex.com/2", thumbnail: "https://ex.com/b.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "A", url: "https://ex.com/1", thumbnail: "https://ex.com/a.jpg" },
+        { index: 2, title: "B", url: "https://ex.com/2", thumbnail: "https://ex.com/b.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
-      { hash: 0xFFFFFFn, width: 100, height: 100 },
+      { hash: 0xffffffn, width: 100, height: 100 },
     ];
-    const result = (await imageSearchTool.execute({ blocklist: ["other.example"] }, SESSION)) as any;
+    const result = (await imageSearchTool.execute(
+      { blocklist: ["other.example"] },
+      SESSION,
+    )) as any;
     expect(result.output).toContain("Title: A");
     expect(result.output).toContain("Title: B");
     expect(result.attachments).toHaveLength(2);
@@ -634,10 +682,12 @@ describe("blocklist", () => {
 
   it("removes results from blocklisted domains", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "Keep", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
-      { index: 2, title: "Block", url: "https://bad.com/2", thumbnail: "https://bad.com/b.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "Keep", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
+        { index: 2, title: "Block", url: "https://bad.com/2", thumbnail: "https://bad.com/b.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
 
@@ -650,9 +700,11 @@ describe("blocklist", () => {
 
   it("returns message when all results are blocked", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "A", url: "https://bad.com/1", thumbnail: "https://bad.com/a.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "A", url: "https://bad.com/1", thumbnail: "https://bad.com/a.jpg" },
+      ]),
+    );
     mockFetchOk();
 
     const result = await imageSearchTool.execute({ blocklist: ["bad.com"] }, SESSION);
@@ -661,10 +713,17 @@ describe("blocklist", () => {
 
   it("blocks subdomains of blocklisted domains", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "A", url: "https://sub.bad.com/1", thumbnail: "https://sub.bad.com/a.jpg" },
-      { index: 2, title: "B", url: "https://good.com/2", thumbnail: "https://good.com/b.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        {
+          index: 1,
+          title: "A",
+          url: "https://sub.bad.com/1",
+          thumbnail: "https://sub.bad.com/a.jpg",
+        },
+        { index: 2, title: "B", url: "https://good.com/2", thumbnail: "https://good.com/b.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
 
@@ -679,10 +738,22 @@ describe("blocklist", () => {
     process.env.IMAGE_SEARCH_BLOCKLIST = "bad.com";
     try {
       mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-      mockSpawn(jsonResponse("Yandex", [
-        { index: 1, title: "Keep", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
-        { index: 2, title: "Block", url: "https://bad.com/2", thumbnail: "https://bad.com/b.jpg" },
-      ]));
+      mockSpawn(
+        jsonResponse("Yandex", [
+          {
+            index: 1,
+            title: "Keep",
+            url: "https://good.com/1",
+            thumbnail: "https://good.com/a.jpg",
+          },
+          {
+            index: 2,
+            title: "Block",
+            url: "https://bad.com/2",
+            thumbnail: "https://bad.com/b.jpg",
+          },
+        ]),
+      );
       mockFetchOk();
       globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
 
@@ -705,14 +776,16 @@ describe("site filter", () => {
 
   it("keeps all results when site filter matches all domains", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "A", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
-      { index: 2, title: "B", url: "https://good.com/2", thumbnail: "https://good.com/b.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "A", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
+        { index: 2, title: "B", url: "https://good.com/2", thumbnail: "https://good.com/b.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
-      { hash: 0xFFFFFFn, width: 100, height: 100 },
+      { hash: 0xffffffn, width: 100, height: 100 },
     ];
     const result = (await imageSearchTool.execute({ site: "good.com" }, SESSION)) as any;
     expect(result.output).toContain("Title: A");
@@ -722,10 +795,12 @@ describe("site filter", () => {
 
   it("filters results to only the matching domain", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "Keep", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
-      { index: 2, title: "Drop", url: "https://bad.com/2", thumbnail: "https://bad.com/b.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "Keep", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
+        { index: 2, title: "Drop", url: "https://bad.com/2", thumbnail: "https://bad.com/b.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
 
@@ -738,10 +813,17 @@ describe("site filter", () => {
 
   it("matches subdomains of the specified site", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "A", url: "https://sub.good.com/1", thumbnail: "https://sub.good.com/a.jpg" },
-      { index: 2, title: "B", url: "https://other.com/2", thumbnail: "https://other.com/b.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        {
+          index: 1,
+          title: "A",
+          url: "https://sub.good.com/1",
+          thumbnail: "https://sub.good.com/a.jpg",
+        },
+        { index: 2, title: "B", url: "https://other.com/2", thumbnail: "https://other.com/b.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
 
@@ -753,9 +835,11 @@ describe("site filter", () => {
 
   it("returns message when all results are filtered by site", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "A", url: "https://bad.com/1", thumbnail: "https://bad.com/a.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "A", url: "https://bad.com/1", thumbnail: "https://bad.com/a.jpg" },
+      ]),
+    );
     mockFetchOk();
 
     const result = await imageSearchTool.execute({ site: "good.com" }, SESSION);
@@ -764,10 +848,12 @@ describe("site filter", () => {
 
   it("site takes precedence over blocklist", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "A", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
-      { index: 2, title: "B", url: "https://bad.com/2", thumbnail: "https://bad.com/b.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "A", url: "https://good.com/1", thumbnail: "https://good.com/a.jpg" },
+        { index: 2, title: "B", url: "https://bad.com/2", thumbnail: "https://bad.com/b.jpg" },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [{ hash: 0n, width: 100, height: 100 }];
 
@@ -781,14 +867,21 @@ describe("site filter", () => {
 
   it("keeps results without a URL", async () => {
     mockRows.push(imageRecord("data:image/png;base64,a", "test.png"));
-    mockSpawn(jsonResponse("Yandex", [
-      { index: 1, title: "No URL", thumbnail: "https://good.com/a.jpg" },
-      { index: 2, title: "With URL", url: "https://good.com/2", thumbnail: "https://good.com/b.jpg" },
-    ]));
+    mockSpawn(
+      jsonResponse("Yandex", [
+        { index: 1, title: "No URL", thumbnail: "https://good.com/a.jpg" },
+        {
+          index: 2,
+          title: "With URL",
+          url: "https://good.com/2",
+          thumbnail: "https://good.com/b.jpg",
+        },
+      ]),
+    );
     mockFetchOk();
     globalThis.__hashMockState.presets = [
       { hash: 0n, width: 100, height: 100 },
-      { hash: 0xFFFFFFn, width: 100, height: 100 },
+      { hash: 0xffffffn, width: 100, height: 100 },
     ];
 
     const result = (await imageSearchTool.execute({ site: "good.com" }, SESSION)) as any;
@@ -801,18 +894,20 @@ describe("site filter", () => {
 describe("Python script JSON contract", () => {
   it("accepts a data URI via stdin and returns valid JSON output", async () => {
     const dataUri = `data:image/png;base64,${MINI_PNG.toString("base64")}`;
-    const { spawn } = await import("child_process");
-    const { fileURLToPath } = await import("url");
+    const { spawn } = await import("node:child_process");
+    const { fileURLToPath } = await import("node:url");
     const proc = spawn(
       "uv",
       ["run", path.join(path.dirname(fileURLToPath(import.meta.url)), "src/search.py")],
       { stdio: ["pipe", "pipe"] },
     );
-    proc.stdin.write(JSON.stringify({
-      source: dataUri,
-      engine: "Yandex",
-      limit: 1,
-    }));
+    proc.stdin.write(
+      JSON.stringify({
+        source: dataUri,
+        engine: "Yandex",
+        limit: 1,
+      }),
+    );
     proc.stdin.end();
 
     let buf = "";
@@ -823,7 +918,6 @@ describe("Python script JSON contract", () => {
 
     expect(() => JSON.parse(buf)).not.toThrow();
     const parsed = JSON.parse(buf);
-    // Should have either an error or a valid search response
     expect(parsed.error || parsed.engine).toBeDefined();
     if (parsed.results) {
       expect(parsed.engine).toBe("Yandex");
@@ -833,18 +927,20 @@ describe("Python script JSON contract", () => {
   });
 
   it("reports error for unknown engine", async () => {
-    const { spawn } = await import("child_process");
-    const { fileURLToPath } = await import("url");
+    const { spawn } = await import("node:child_process");
+    const { fileURLToPath } = await import("node:url");
     const proc = spawn(
       "uv",
       ["run", path.join(path.dirname(fileURLToPath(import.meta.url)), "src/search.py")],
       { stdio: ["pipe", "pipe"] },
     );
-    proc.stdin.write(JSON.stringify({
-      source: "https://example.com/img.jpg",
-      engine: "FakeEngine",
-      limit: 1,
-    }));
+    proc.stdin.write(
+      JSON.stringify({
+        source: "https://example.com/img.jpg",
+        engine: "FakeEngine",
+        limit: 1,
+      }),
+    );
     proc.stdin.end();
 
     let buf = "";

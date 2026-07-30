@@ -250,7 +250,7 @@ const imageSearchTool = tool({
   description:
     "Retrieve an image from the session and perform a reverse image search. " +
     "Omit all args to use the most recent image with default params. " +
-    "Supports multiple search engines (see below). " +
+    "Supports multiple search engines (default: yandex). " +
     "Text-only models: use this tool when asked about an image you cannot view.",
   args: {
     index: tool.schema
@@ -259,7 +259,7 @@ const imageSearchTool = tool({
       .positive()
       .optional()
       .describe(
-        "1 = oldest image in conversation. If filename is set, index filtered list. (default: latest)",
+        "1 = oldest image in conversation. If filename is set, index the filtered list. (default: latest)",
       ),
     filename: tool.schema
       .string()
@@ -292,8 +292,6 @@ const imageSearchTool = tool({
       ),
   },
   async execute(args, context) {
-    // Try bun:sqlite first (Bun CLI), fall back to context.messages
-    // (desktop app) where native addons and WASM aren't available.
     const parts = await findSessionImages(context);
     if (!parts) {
       return (

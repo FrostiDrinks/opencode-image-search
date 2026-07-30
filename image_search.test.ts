@@ -41,9 +41,6 @@ mock.module("@opencode-ai/plugin", () => {
 });
 
 let mockRows: { data: string }[] = [];
-
-// The factory uses require() inside the mock.module callback, which
-// bypasses the mock system and gives us the real child_process.
 let mockSpawnImpl: ((...args: any[]) => any) | null = null;
 
 mock.module("child_process", () => {
@@ -53,8 +50,6 @@ mock.module("child_process", () => {
   };
 });
 
-// findSessionImages tries bun:sqlite first (Bun CLI), falls back to
-// context.messages (desktop app). Mock it to return test data.
 mock.module("./src/images", () => ({
   findSessionImages: async () =>
     mockRows.map((r) => JSON.parse(r.data)) as Record<string, unknown>[],
